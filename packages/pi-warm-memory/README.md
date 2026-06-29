@@ -1,5 +1,7 @@
 # pi-warm-memory
 
+[![npm version](https://img.shields.io/npm/v/pi-warm-memory)](https://www.npmjs.com/package/pi-warm-memory) [![npm downloads](https://img.shields.io/npm/dm/pi-warm-memory)](https://www.npmjs.com/package/pi-warm-memory) [![License: MIT](https://img.shields.io/npm/l/pi-warm-memory)](https://www.npmjs.com/package/pi-warm-memory)
+
 > Cross-session episodic memory for [pi](https://github.com/earendil-works/pi) agents.
 >
 > **"pi loses your context between sessions. This fixes it."**
