@@ -1,0 +1,49 @@
+{
+  "name": "pi-warm-memory",
+  "version": "0.0.1",
+  "description": "Cross-session episodic memory for pi agents: /archive-session handoff & checkpoint packets with a searchable append-only index.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "memory",
+    "agent"
+  ],
+  "license": "MIT",
+  "author": "byhow",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/byhow/pi-trust-mono.git",
+    "directory": "packages/pi-warm-memory"
+  },
+  "files": [
+    "src",
+    "templates",
+    "rules",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "commands": [
+      "./src/commands/archive-session.ts"
+    ],
+    "rules": [
+      "./rules"
+    ],
+    "settings": {
+      "historyDir": {
+        "type": "string",
+        "default": ".pi/history",
+        "env": "PI_WARM_HISTORY_DIR",
+        "description": "Where handoff/checkpoint packets + index.jsonl are stored. An absolute path, or relative to the project root."
+      }
+    }
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

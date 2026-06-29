@@ -1,0 +1,14 @@
+{
+  "name": "pi-trust-mono",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit -p tsconfig.base.json"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "typescript": "^5.9.0"
+  }
+}
