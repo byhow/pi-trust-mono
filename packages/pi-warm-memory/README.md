@@ -23,24 +23,23 @@ HOT ──session ends──► WARM ──aging/relevance──► COLD
   (decisions, blockers, next step, tags) to a searchable archive.
   `/archive-session checkpoint` writes a lighter **checkpoint packet** for
   mid-workstream snapshots.
-- **At session start:** a **retrieval protocol** rule tells the agent to scan the index
-  for the topic / files / tags, open the top-matching packets, and reconstruct *only the
-  relevant* prior context — then continue fresh.
+- **At session start:** `/recall <query>` ranks the archive by relevance and surfaces the
+  top packets to read, so the agent reconstructs *only the relevant* prior context — then
+  continues fresh. (A **retrieval protocol** rule reminds it to do this before non-trivial
+  work on an existing topic.)
 
-No vector DB, no embeddings, no server. Packets are markdown; the index is an
-append-only JSONL you can `grep` and `git diff`. The LLM does the summarization (the
-hard part); the retrieval is a cheap, exact scan.
+No server, no external vector DB. The durable store is still an append-only JSONL you can
+`grep` and `git diff` — that stays the source of truth. Search runs over a **disposable
+in-memory index** ([Orama](https://github.com/oramasearch/orama), pure JS) rebuilt from the
+JSONL on demand; BM25 keyword ranking is the default and embeddings/hybrid search are
+opt-in. The LLM does the summarization (the hard part); retrieval is cheap and always fresh.
 
 ## Install
 
+Published on npm as [`pi-warm-memory`](https://www.npmjs.com/package/pi-warm-memory):
+
 ```
 pi install npm:pi-warm-memory
-```
-
-Or from source:
-
-```
-pi install git:github.com/byhow/pi-warm-memory
 ```
 
 On first `/archive-session` the index header is seeded automatically — no postinstall step.
@@ -64,6 +63,26 @@ Same mechanism, lighter template — focused on *what changed since the last che
 ```
 /archive-session checkpoint mid-refactor state before the API redesign
 ```
+
+### `/recall <query> [--tags a,b] [--since YYYY-MM-DD] [--kind handoff|checkpoint]`
+
+Searches prior packets and surfaces the most relevant, so a fresh session can continue
+where an old one left off. Ranking (BM25) runs in code; the command returns the ranked
+packet paths plus instructions telling the agent which 1–3 to `read` and reconstruct —
+it doesn't dump every packet into context.
+
+```
+/recall auth refactor
+/recall session validator --tags auth,backend
+/recall payments migration --since 2026-06-01 --kind handoff
+```
+
+- `--tags a,b` — require all listed tags (AND).
+- `--since YYYY-MM-DD` — only packets on or after the date.
+- `--kind handoff|checkpoint` — restrict to one packet kind.
+
+The index is rebuilt from `index.jsonl` on each call, so recall is always current with no
+manual reindex step.
 
 ## Packet formats
 
@@ -166,11 +185,11 @@ The history directory is configurable via the `historyDir` setting (see `package
 ## Retrieval protocol
 
 The bundled rule (`rules/retrieval-protocol.md`) becomes part of the agent's context:
-before non-trivial work on an existing topic it searches the index, opens the top-matching
-packets, and reconstructs only the relevant prior context. It also carries an **isolation
-guardrail**: don't enable subagents / async delegation until handoff packets are being
-written consistently — fragmented work without a retrieval contract *increases* context
-loss.
+before non-trivial work on an existing topic it runs `/recall <topic>`, opens the
+top-ranked packets, and reconstructs only the relevant prior context. It also carries an
+**isolation guardrail**: don't enable subagents / async delegation until handoff packets
+are being written consistently — fragmented work without a retrieval contract *increases*
+context loss.
 
 ## License
 

@@ -8,6 +8,8 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit -p tsconfig.base.json",
+    "test": "npm run test --workspaces --if-present",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "changeset publish"
@@ -15,6 +17,8 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@changesets/cli": "^2.31.0",
+    "@oh-my-pi/pi-coding-agent": "^16.3.12",
+    "@types/node": "^22.20.1",
     "typescript": "^5.9.0"
   }
 }
