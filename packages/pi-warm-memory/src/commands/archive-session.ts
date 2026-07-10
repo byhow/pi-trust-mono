@@ -66,6 +66,7 @@ const createCommand = (api: CustomCommandAPI): CustomCommand => ({
     "Usage: /archive-session [checkpoint] <instruction>",
   async execute(args, ctx) {
     const { packetKind, instruction } = parseArchiveArgs(args);
+    const sessionId = getSessionId(ctx);
 
     const packageRoot = await getPackageRoot();
     const historyDir = resolveHistoryDir(ctx.cwd);
@@ -83,7 +84,7 @@ const createCommand = (api: CustomCommandAPI): CustomCommand => ({
     return buildArchivePrompt({
       packetKind,
       instruction,
-      sessionId: getSessionId(ctx),
+      sessionId,
       cwd: ctx.cwd,
       historyDir,
       timestamp: new Date().toISOString(),
