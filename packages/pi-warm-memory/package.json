@@ -24,9 +24,15 @@
     "CHANGELOG.md",
     "LICENSE"
   ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
   "pi": {
     "commands": [
-      "./src/commands/archive-session.ts"
+      "./src/commands/archive-session.ts",
+      "./src/commands/recall.ts"
     ],
     "rules": [
       "./rules"
@@ -50,6 +56,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "typescript": "^5.6.0"
+    "@vitest/coverage-v8": "^4.1.10",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@orama/orama": "^3.1.18"
   }
 }
