@@ -1,6 +1,6 @@
 {
   "name": "pi-warm-memory",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Cross-session episodic memory for pi agents: /archive-session handoff & checkpoint packets with a searchable append-only index.",
   "type": "module",
   "keywords": [
