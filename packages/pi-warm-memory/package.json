@@ -21,6 +21,8 @@
     "src/git-context.ts",
     "src/packets.ts",
     "src/paths.ts",
+    "src/prompt-frame.ts",
+    "src/storage.ts",
     "src/commands/archive-core.ts",
     "src/commands/recall-core.ts",
     "src/search/corpus.ts",
@@ -68,6 +70,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "@orama/orama": "^3.1.18"
+    "@orama/orama": "^3.1.18",
+    "typebox": "1.3.7"
   }
 }

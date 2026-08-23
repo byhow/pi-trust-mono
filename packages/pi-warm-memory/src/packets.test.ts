@@ -82,7 +82,7 @@ describe("buildPacketDocs", () => {
     });
   });
 
-  test("maps existing index-v1 packet refs to absolute read locators", async () => {
+  test("maps existing index-v1 packet refs to archive-relative locators", async () => {
     const historyDir = await writeIndex([header, ref()]);
     const result = await buildPacketDocs(historyDir);
     expect(result.status).toBe("ready");
@@ -90,40 +90,25 @@ describe("buildPacketDocs", () => {
     const [doc] = result.docs;
     expect(doc?.title).toBe("auth token refactor");
     expect(doc?.source).toBe("handoff");
-    expect(doc?.filePath).toBe(
-      await realpath(join(historyDir, "packets", "2026", "04", "auth.md")),
-    );
+    expect(doc?.filePath).toBe("packets/2026/04/auth.md");
     expect(doc?.tags).toEqual(["auth", "backend"]);
     expect(doc?.content).toContain("session-validator");
   });
 
-  test("maps a minimal packet ref with stable defaults", async () => {
-    const minimalPath = "packets/2026/04/minimal.md";
+  test("rejects packet refs whose typed metadata is absent or malformed", async () => {
     const historyDir = await writeIndex([
       header,
       ref({
-        path: minimalPath,
+        path: "packets/2026/04/minimal.md",
         packetKind: undefined,
-        timestamp: undefined,
-        topic: undefined,
-        summary: undefined,
         tags: "not-an-array",
         files: null,
       }),
     ]);
-    const result = await buildPacketDocs(historyDir);
-    expect(result.status).toBe("ready");
-    expect(result.docs).toEqual([
-      {
-        title: minimalPath,
-        content: "",
-        date: "",
-        tags: [],
-        source: "handoff",
-        filePath: await realpath(join(historyDir, minimalPath)),
-        excerpt: "",
-      },
-    ]);
+    expect(await buildPacketDocs(historyDir)).toEqual({
+      status: "corrupt",
+      docs: [],
+    });
   });
 
   test("rejects a malformed non-terminal packet record", async () => {
@@ -168,13 +153,14 @@ describe("buildPacketDocs", () => {
     expect((await buildPacketDocs(historyDir)).docs).toEqual([]);
   });
 
-  test("preserves packet kind and tolerates non-array metadata", async () => {
+  test("rejects non-array packet metadata", async () => {
     const historyDir = await writeIndex([
       header,
       ref({ packetKind: "checkpoint", tags: "bad", files: null }),
     ]);
-    const [doc] = (await buildPacketDocs(historyDir)).docs;
-    expect(doc?.source).toBe("checkpoint");
-    expect(doc?.tags).toEqual([]);
+    expect(await buildPacketDocs(historyDir)).toEqual({
+      status: "corrupt",
+      docs: [],
+    });
   });
 });

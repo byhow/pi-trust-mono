@@ -1,169 +1,406 @@
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { constants } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  open,
+  realpath,
+  unlink,
+  type FileHandle,
+} from "node:fs/promises";
+import { basename, join, relative, sep } from "node:path";
 import { INDEX_HEADER, type ArchiveDraft } from "./commands/archive-core.ts";
 import { allowsGitTracking, type HistoryLocation } from "./paths.ts";
 
+const MAX_INDEX_BYTES = 4 * 1024 * 1024;
+const PRIVATE_IGNORE = "*\n!.gitignore\n";
+
 export type WriteArchiveResult =
   | { readonly status: "success"; readonly locator: string }
-  | { readonly status: "escaped" }
-  | { readonly status: "index-missing" }
-  | { readonly status: "index-corrupt" }
-  | { readonly status: "index-locked" };
+  | {
+      readonly status:
+        | "unsafe"
+        | "index-corrupt"
+        | "collision"
+        | "write-failed";
+    };
+
+const errorCode = (error: unknown): string | undefined =>
+  typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : undefined;
 
 const slugify = (text: string): string =>
   text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
+    .replace(/^-|-$/g, "")
+    .slice(0, 64);
 
-const writeJsonlAppend = async (
-  path: string,
-  entry: string,
-): Promise<boolean> => {
-  try {
-    const fd = await readFile(path, "utf8");
-    if (!fd.startsWith(INDEX_HEADER.slice(0, 30))) return false;
-  } catch {
-    return false;
-  }
-  try {
-    await writeFile(path, `\n${entry}`, { flag: "a", encoding: "utf8" });
-    return true;
-  } catch {
-    return false;
-  }
-};
+const list = (values: readonly string[]): string =>
+  values.length > 0
+    ? values.map((value) => `  - ${value}`).join("\n")
+    : "  - None";
 
 const renderPacketMarkdown = (
+  sessionId: string,
   timestamp: string,
+  repository: string,
   draft: ArchiveDraft,
 ): string => {
-  const parts = [
-    `# ${draft.packetKind === "handoff" ? "Handoff" : "Checkpoint"} Packet`,
-  ];
-  parts.push(
-    `- Timestamp: ${timestamp}\n- Topic: ${draft.topic}\n- Tags: ${draft.tags.join(" ") || "none"}`,
-  );
-  if (draft.goal) parts.push(`- Goal: ${draft.goal}`);
-  if (draft.risk) parts.push(`- Risk: ${draft.risk}`);
-  parts.push(`- Next Step: ${draft.nextStep}`);
-  parts.push(`## Summary\n${draft.summary}`);
-  if (draft.files.length) {
-    parts.push(`## Files\n${draft.files.map((f) => `- ${f}`).join("\n")}`);
+  if (draft.packetKind === "checkpoint") {
+    return `# Checkpoint Packet
+
+- Thread ID: ${sessionId}
+- Timestamp: ${timestamp}
+- Current Task: ${draft.topic}
+- What Changed Since Last Checkpoint:
+${list(draft.changes)}
+- Files Touched:
+${list(draft.files)}
+- Current Risk: ${draft.risk || "None"}
+- Pending Decisions:
+${list(draft.pendingDecisions)}
+- Immediate Next Step: ${draft.nextStep}
+- Tags: ${draft.tags.join(", ") || "none"}
+- Brief Summary: ${draft.summary}
+`;
   }
-  if (draft.decisions.length) {
-    parts.push(
-      `## Decisions\n${draft.decisions.map((d) => `- ${d}`).join("\n")}`,
-    );
-  }
-  if (draft.commands.length) {
-    parts.push(
-      `## Commands\n${draft.commands.map((c) => `- ${c}`).join("\n")}`,
-    );
-  }
-  if (draft.blockers.length) {
-    parts.push(
-      `## Blockers\n${draft.blockers.map((b) => `- ${b}`).join("\n")}`,
-    );
-  }
-  if (draft.openQuestions.length) {
-    parts.push(
-      `## Open Questions\n${draft.openQuestions.map((q) => `- ${q}`).join("\n")}`,
-    );
-  }
-  if (draft.changes.length) {
-    parts.push(`## Changes\n${draft.changes.map((c) => `- ${c}`).join("\n")}`);
-  }
-  if (draft.pendingDecisions.length) {
-    parts.push(
-      `## Pending Decisions\n${draft.pendingDecisions.map((d) => `- ${d}`).join("\n")}`,
-    );
-  }
-  return parts.join("\n\n") + "\n";
+
+  return `# Handoff Packet
+
+- Thread ID: ${sessionId}
+- Timestamp: ${timestamp}
+- Repository: ${repository}
+- Topic: ${draft.topic}
+- Goal: ${draft.goal || draft.topic}
+- Decisions Made:
+${list(draft.decisions)}
+- Files Touched:
+${list(draft.files)}
+- Commands Run:
+${list(draft.commands)}
+- Blockers:
+${list(draft.blockers)}
+- Open Questions:
+${list(draft.openQuestions)}
+- Next Recommended Step: ${draft.nextStep}
+- Tags: ${draft.tags.join(", ") || "none"}
+- Compact Summary: ${draft.summary}
+`;
 };
 
-/**
- * Safely create the packet file and append it to the index.
- * The destination must remain under the canonical history root; symlinks
- * that escape the root cause the operation to fail closed.
- */
+const ensureProjectScopedRoot = async (
+  location: HistoryLocation,
+): Promise<string> => {
+  const canonicalProject = await realpath(location.projectRoot);
+  const pathFromProject = relative(location.projectRoot, location.path);
+  let current = canonicalProject;
+
+  for (const segment of pathFromProject.split(sep)) {
+    current = join(current, segment);
+    try {
+      const metadata = await lstat(current);
+      if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+        throw new Error("unsafe history directory");
+      }
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") throw error;
+      await mkdir(current, { mode: 0o700 });
+      const metadata = await lstat(current);
+      if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+        throw new Error("unsafe history directory");
+      }
+    }
+  }
+
+  return current;
+};
+
+const prepareHistoryRoot = async (
+  location: HistoryLocation,
+): Promise<string> => {
+  if (location.projectScoped) return ensureProjectScopedRoot(location);
+
+  await mkdir(location.path, { recursive: true, mode: 0o700 });
+  const metadata = await lstat(location.path);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error("unsafe history directory");
+  }
+  return realpath(location.path);
+};
+
+const ensureNestedDirectory = async (
+  root: string,
+  segments: readonly string[],
+): Promise<string> => {
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    try {
+      await mkdir(current, { mode: 0o700 });
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") throw error;
+    }
+    const metadata = await lstat(current);
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new Error("unsafe archive directory");
+    }
+  }
+  return current;
+};
+
+const assertRegularPrivateFile = async (
+  handle: FileHandle,
+  maxBytes: number,
+): Promise<number> => {
+  const metadata = await handle.stat();
+  if (
+    !metadata.isFile() ||
+    metadata.nlink !== 1 ||
+    metadata.size > maxBytes ||
+    (metadata.mode & 0o022) !== 0
+  ) {
+    throw new Error("unsafe archive file");
+  }
+  return metadata.size;
+};
+
+const readExact = async (handle: FileHandle, size: number): Promise<string> => {
+  const buffer = Buffer.alloc(size + 1);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      offset,
+      buffer.length - offset,
+      offset,
+    );
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  if (offset !== size) throw new Error("archive file changed while reading");
+  return buffer.subarray(0, size).toString("utf8");
+};
+
+const validateIndex = (raw: string): boolean => {
+  const lines = raw.split(/\r?\n/);
+  if (lines[0] !== INDEX_HEADER) return false;
+  for (const line of lines.slice(1)) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as { kind?: unknown; version?: unknown };
+      if (parsed.kind !== "packet-ref" || parsed.version !== 1) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+};
+
+type OpenedIndex = {
+  readonly handle: FileHandle;
+  readonly endsWithNewline: boolean;
+};
+
+const openIndexForAppend = async (
+  indexPath: string,
+): Promise<OpenedIndex | undefined> => {
+  try {
+    const handle = await open(
+      indexPath,
+      constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW,
+    );
+    try {
+      const size = await assertRegularPrivateFile(handle, MAX_INDEX_BYTES);
+      const raw = await readExact(handle, size);
+      if (!validateIndex(raw)) throw new Error("corrupt archive index");
+      return { handle, endsWithNewline: raw.endsWith("\n") };
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return undefined;
+    throw error;
+  }
+};
+
+const ensurePrivateIgnore = async (root: string): Promise<void> => {
+  const ignorePath = join(root, ".gitignore");
+  try {
+    const handle = await open(
+      ignorePath,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      await handle.writeFile(PRIVATE_IGNORE, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error;
+    const handle = await open(
+      ignorePath,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    try {
+      await assertRegularPrivateFile(handle, 4 * 1024);
+    } finally {
+      await handle.close();
+    }
+  }
+};
+
+const commitIndex = async (
+  indexPath: string,
+  openedIndex: OpenedIndex | undefined,
+  entry: string,
+): Promise<void> => {
+  if (openedIndex) {
+    try {
+      const prefix = openedIndex.endsWithNewline ? "" : "\n";
+      await openedIndex.handle.writeFile(`${prefix}${entry}\n`, "utf8");
+      await openedIndex.handle.sync();
+    } finally {
+      await openedIndex.handle.close();
+    }
+    return;
+  }
+
+  try {
+    const handle = await open(
+      indexPath,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      await handle.writeFile(`${INDEX_HEADER}\n${entry}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error;
+    const concurrentIndex = await openIndexForAppend(indexPath);
+    if (!concurrentIndex) throw new Error("archive index disappeared");
+    await commitIndex(indexPath, concurrentIndex, entry);
+  }
+};
+
+const safeMetadata = (value: string, maxLength: number): boolean =>
+  value.length > 0 &&
+  value.length <= maxLength &&
+  !/[\u0000-\u001f\u007f]/u.test(value);
+
+/** Atomically creates a packet before committing its single append-only index record. */
 export const persistArchive = async (
   location: HistoryLocation,
   sessionId: string,
   timestamp: string,
-  repoName: string,
+  repository: string,
   gitTracking: string | undefined,
   draft: ArchiveDraft,
 ): Promise<WriteArchiveResult> => {
-  let root: string;
-  try {
-    root = await realpath(location.path);
-  } catch {
-    root = location.path;
-  }
   if (
-    location.projectScoped &&
-    relative(location.projectRoot, root).startsWith("..")
+    !safeMetadata(sessionId, 256) ||
+    !safeMetadata(timestamp, 64) ||
+    !safeMetadata(repository, 256)
   ) {
-    return { status: "escaped" };
+    return { status: "unsafe" };
   }
 
-  const year = timestamp.slice(0, 4);
-  const month = timestamp.slice(5, 7);
-  const safeTimestamp = timestamp.replace(/:/g, "-");
-  const slug = slugify(draft.topic) || "session";
-  const filename = `${safeTimestamp}-${draft.packetKind}-${slug}.md`;
-
-  const packetDir = join(root, "packets", year, month);
-  const packetPath = join(packetDir, filename);
-  const indexPath = join(root, "index.jsonl");
-
+  let root: string;
+  let packetHandle: FileHandle | undefined;
+  let packetPath = "";
   try {
-    await mkdir(packetDir, { recursive: true });
-    const resolvedPacketDir = await realpath(packetDir);
-    if (!resolvedPacketDir.startsWith(root)) return { status: "escaped" };
-  } catch {
-    return { status: "escaped" };
-  }
-
-  if (location.projectScoped && !allowsGitTracking(gitTracking)) {
-    try {
-      await stat(join(root, ".gitignore"));
-    } catch {
-      await writeFile(join(root, ".gitignore"), "*\n!.gitignore\n", "utf8");
+    root = await prepareHistoryRoot(location);
+    if (location.projectScoped && !allowsGitTracking(gitTracking)) {
+      await ensurePrivateIgnore(root);
     }
-  }
 
-  let hasIndex = false;
-  try {
-    await stat(indexPath);
-    hasIndex = true;
+    const year = timestamp.slice(0, 4);
+    const month = timestamp.slice(5, 7);
+    if (!/^\d{4}$/u.test(year) || !/^\d{2}$/u.test(month)) {
+      return { status: "unsafe" };
+    }
+
+    const packetDir = await ensureNestedDirectory(root, [
+      "packets",
+      year,
+      month,
+    ]);
+    const slug = slugify(draft.topic) || "session";
+    const filename = `${timestamp.replace(/:/gu, "-")}-${draft.packetKind}-${slug}.md`;
+    packetPath = join(packetDir, filename);
+    const locator = `packets/${year}/${month}/${filename}`;
+    const indexPath = join(root, "index.jsonl");
+    const openedIndex = await openIndexForAppend(indexPath);
+
+    try {
+      packetHandle = await open(
+        packetPath,
+        constants.O_WRONLY |
+          constants.O_CREAT |
+          constants.O_EXCL |
+          constants.O_NOFOLLOW,
+        0o600,
+      );
+    } catch (error) {
+      await openedIndex?.handle.close();
+      return {
+        status: errorCode(error) === "EEXIST" ? "collision" : "write-failed",
+      };
+    }
+
+    const packetMetadata = await packetHandle.stat();
+    await packetHandle.writeFile(
+      renderPacketMarkdown(sessionId, timestamp, repository, draft),
+      "utf8",
+    );
+    await packetHandle.sync();
+
+    const entry = JSON.stringify({
+      version: 1,
+      kind: "packet-ref",
+      packetKind: draft.packetKind,
+      threadId: sessionId,
+      timestamp,
+      repo: basename(repository),
+      path: locator,
+      topic: draft.topic,
+      tags: draft.tags,
+      files: draft.files,
+      summary: draft.summary,
+    });
+
+    try {
+      await commitIndex(indexPath, openedIndex, entry);
+    } catch {
+      await packetHandle.close();
+      packetHandle = undefined;
+      const currentMetadata = await lstat(packetPath);
+      if (
+        currentMetadata.dev === packetMetadata.dev &&
+        currentMetadata.ino === packetMetadata.ino
+      ) {
+        await unlink(packetPath);
+      }
+      return { status: "index-corrupt" };
+    }
+
+    await packetHandle.close();
+    packetHandle = undefined;
+    return { status: "success", locator };
   } catch {
-    await writeFile(indexPath, INDEX_HEADER, "utf8");
-    hasIndex = true;
+    await packetHandle?.close();
+    return { status: "unsafe" };
   }
-
-  const packetRel = `packets/${year}/${month}/${filename}`;
-  const entry = JSON.stringify({
-    version: 1,
-    kind: "packet-ref",
-    packetKind: draft.packetKind,
-    threadId: sessionId,
-    timestamp,
-    repo: repoName,
-    path: packetRel,
-    topic: draft.topic,
-    tags: draft.tags,
-    files: draft.files,
-    summary: draft.summary,
-  });
-
-  if (hasIndex) {
-    const appended = await writeJsonlAppend(indexPath, entry);
-    if (!appended) return { status: "index-corrupt" };
-  }
-
-  await writeFile(packetPath, renderPacketMarkdown(timestamp, draft), "utf8");
-
-  return { status: "success", locator: packetRel };
 };
