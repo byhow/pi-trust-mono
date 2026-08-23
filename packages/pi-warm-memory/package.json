@@ -17,39 +17,46 @@
     "directory": "packages/pi-warm-memory"
   },
   "files": [
-    "src",
+    "src/index.ts",
+    "src/git-context.ts",
+    "src/packets.ts",
+    "src/paths.ts",
+    "src/commands/archive-core.ts",
+    "src/commands/recall-core.ts",
+    "src/search/corpus.ts",
+    "src/search/persistence.ts",
     "templates",
     "rules",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
+  "omp": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
   "pi": {
-    "commands": [
-      "./src/commands/archive-session.ts",
-      "./src/commands/recall.ts"
-    ],
-    "rules": [
-      "./rules"
-    ],
-    "settings": {
-      "historyDir": {
-        "type": "string",
-        "default": ".pi/history",
-        "env": "PI_WARM_HISTORY_DIR",
-        "description": "Where handoff/checkpoint packets + index.jsonl are stored. An absolute path, or relative to the project root."
-      }
-    }
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "peerDependencies": {
-    "@oh-my-pi/pi-coding-agent": ">=16.0.0"
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@oh-my-pi/pi-coding-agent": "17.4.1 || 18.0.3"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
     "@oh-my-pi/pi-coding-agent": {
       "optional": true
     }
