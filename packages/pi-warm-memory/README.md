@@ -44,6 +44,16 @@ pi install npm:pi-warm-memory
 
 On first `/archive-session` the index header is seeded automatically — no postinstall step.
 
+## Supported hosts
+
+| Host | Tested version | Package behavior |
+|---|---|---|
+| Oh My Pi | 17.4.1 and 18.0.3 | Commands and conventional retrieval rule; configure the history root with `PI_WARM_HISTORY_DIR` |
+| Pi | 0.84.2 | Commands; configure the history root with `PI_WARM_HISTORY_DIR` |
+
+Other host versions are not claimed until their packed-package conformance test passes.
+
+
 ## Usage
 
 ### `/archive-session [instruction]`
@@ -94,7 +104,7 @@ manual reindex step.
 - Thread ID:
 - Parent Thread ID:
 - Timestamp:
-- Repo/CWD:
+- Repository:
 - Topic:
 - Goal:
 - Decisions Made:
@@ -131,11 +141,8 @@ session summarizes it (one call, no context transfer, no drift between "what the
 did" and "what the packet says"). The command:
 
 1. Parses the packet kind (`handoff` / `checkpoint`) and the user instruction.
-2. Collects machine context — session thread ID, git repo / branch / commit / files-touched,
-   timestamp.
-3. Reads the matching template and returns a prompt instructing the agent to fill it from
-   the conversation, write the packet to `history/packets/YYYY/MM/`, and append **one** JSON
-   line to the index.
+2. Collects session identity plus Git repo / branch / commit / files-touched context.
+3. Reads the matching template and prompts the model to fill it from the conversation, write the packet to `history/packets/YYYY/MM/`, and append **one** JSON line to the index. Local absolute working-directory paths are not stored by default.
 
 The agent then writes the packet + index entry with its normal file tooling.
 
@@ -157,7 +164,6 @@ Each subsequent line is a packet reference:
   "threadId": "019dc293-286f-7000-bdee-8e943b88d6a5",
   "timestamp": "2026-05-05T05:47:04.250Z",
   "repo": "my-project",
-  "cwd": "/home/me/code/my-project",
   "path": "packets/2026/05/2026-05-05T05-47-04.250Z-handoff-auth-refactor.md",
   "topic": "auth refactor",
   "tags": ["auth", "backend"],
@@ -170,12 +176,11 @@ Each subsequent line is a packet reference:
 
 ## Configuration
 
-The history directory is configurable via the `historyDir` setting (see `package.json` →
-`pi.settings`) or its env fallback:
+The history directory is configurable through the `PI_WARM_HISTORY_DIR` environment variable:
 
 | Setting | Env | Default | Notes |
 |---|---|---|---|
-| `historyDir` | `PI_WARM_HISTORY_DIR` | `.pi/history` (project-local) | Absolute path, or relative to the project root. |
+| N/A | `PI_WARM_HISTORY_DIR` | `.pi/history` (project-local) | Absolute path, or relative to the project root. |
 
 ```sh
 # project-local (default, shareable via git): .pi/history
@@ -184,12 +189,15 @@ The history directory is configurable via the `historyDir` setting (see `package
 
 ## Retrieval protocol
 
-The bundled rule (`rules/retrieval-protocol.md`) becomes part of the agent's context:
-before non-trivial work on an existing topic it runs `/recall <topic>`, opens the
-top-ranked packets, and reconstructs only the relevant prior context. It also carries an
-**isolation guardrail**: don't enable subagents / async delegation until handoff packets
-are being written consistently — fragmented work without a retrieval contract *increases*
-context loss.
+OMP discovers the bundled `rules/retrieval-protocol.md` through its conventional plugin
+capability directories. It reminds the agent to run `/recall <topic>`, open only the top
+ranked packets, and reconstruct relevant prior context. Upstream Pi loads the commands but
+does not currently claim automatic rule parity; apply the same protocol through your Pi
+instructions when desired.
+
+The rule also carries an **isolation guardrail**: do not enable subagents or asynchronous
+delegation until handoff packets are written consistently, because fragmented work without
+a retrieval contract increases context loss.
 
 ## License
 

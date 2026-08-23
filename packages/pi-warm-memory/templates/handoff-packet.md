@@ -3,7 +3,7 @@
 - Thread ID:
 - Parent Thread ID:
 - Timestamp:
-- Repo/CWD:
+- Repository:
 - Topic:
 - Goal:
 - Decisions Made:
