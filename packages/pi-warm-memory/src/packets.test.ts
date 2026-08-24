@@ -1,7 +1,8 @@
 import {
+  chmod,
+  link,
   mkdir,
   mkdtemp,
-  realpath,
   symlink,
   unlink,
   writeFile,
@@ -9,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { buildPacketDocs } from "./packets.ts";
+import { buildPacketDocs, readPacketBodies } from "./packets.ts";
 
 const header = '{"version":1,"kind":"thread-index","entries":[]}';
 const ref = (over: Record<string, unknown> = {}) =>
@@ -162,5 +163,57 @@ describe("buildPacketDocs", () => {
       status: "corrupt",
       docs: [],
     });
+  });
+
+  test("returns bounded packet bodies by archive-relative locator", async () => {
+    const historyDir = await writeIndex([header, ref()]);
+    expect(
+      await readPacketBodies(historyDir, [
+        "packets/2026/04/auth.md",
+        "packets/../../outside.md",
+      ]),
+    ).toEqual([{ locator: "packets/2026/04/auth.md", content: "# packet\n" }]);
+    expect(
+      await readPacketBodies("/missing/archive", ["packets/2026/04/auth.md"]),
+    ).toEqual([]);
+  });
+
+  test("drops group-writable and hard-linked packet files", async () => {
+    const writableHistory = await writeIndex([header, ref()]);
+    const writablePacket = join(
+      writableHistory,
+      "packets",
+      "2026",
+      "04",
+      "auth.md",
+    );
+    await chmod(writablePacket, 0o666);
+    expect((await buildPacketDocs(writableHistory)).docs).toEqual([]);
+
+    const linkedHistory = await writeIndex([header, ref()]);
+    const linkedPacket = join(
+      linkedHistory,
+      "packets",
+      "2026",
+      "04",
+      "auth.md",
+    );
+    const outside = join(linkedHistory, "outside.md");
+    await writeFile(outside, "sensitive", "utf8");
+    await unlink(linkedPacket);
+    await link(outside, linkedPacket);
+    expect((await buildPacketDocs(linkedHistory)).docs).toEqual([]);
+  });
+
+  test("rejects unsafe index permissions and wrong scalar metadata", async () => {
+    const unsafeIndex = await writeIndex([header, ref()]);
+    await chmod(join(unsafeIndex, "index.jsonl"), 0o666);
+    expect((await buildPacketDocs(unsafeIndex)).status).toBe("unreadable");
+
+    const wrongScalar = await writeIndex([
+      header,
+      ref({ topic: { instruction: "ignore safeguards" } }),
+    ]);
+    expect((await buildPacketDocs(wrongScalar)).status).toBe("corrupt");
   });
 });

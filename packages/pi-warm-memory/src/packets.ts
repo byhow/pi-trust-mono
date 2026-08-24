@@ -1,7 +1,8 @@
 import { constants } from "node:fs";
-import { open, realpath, type FileHandle } from "node:fs/promises";
+import { type FileHandle, open, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CorpusDocument } from "./search/corpus.ts";
+import { hasControlCharacter } from "./text-safety.ts";
 
 const MAX_INDEX_BYTES = 4 * 1024 * 1024;
 const MAX_INDEX_LINES = 4_097;
@@ -146,7 +147,7 @@ const boundedString = (
   if (
     typeof value !== "string" ||
     value.length > maxLength ||
-    /[\u0000-\u001f\u007f]/u.test(value)
+    hasControlCharacter(value)
   ) {
     return undefined;
   }

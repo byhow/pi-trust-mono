@@ -13,8 +13,11 @@
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit -p tsconfig.base.json",
     "test": "npm run test --workspaces --if-present",
+    "verify": "npm run verify:lockfile && npm run verify:packages && npm run verify:pack && npm run lint && npm run typecheck && npm run test:coverage",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
     "verify:lockfile": "node scripts/verify-public-lockfile.mjs",
+    "verify:packages": "node scripts/verify-package-contracts.mjs",
+    "verify:pack": "node scripts/verify-packed-packages.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "changeset publish"
@@ -22,8 +25,6 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@changesets/cli": "^2.31.0",
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@oh-my-pi/pi-coding-agent": "18.0.3",
     "@types/node": "^22.20.1",
     "typescript": "^5.9.0"
   }

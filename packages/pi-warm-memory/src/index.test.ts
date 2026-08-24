@@ -1,11 +1,10 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import warmMemoryExtension from "./index.ts";
 import { HISTORY_DIR_ENV } from "./paths.ts";
 
-const header = '{"version":1,"kind":"thread-index","entries":[]}';
 const originalHistoryDir = process.env[HISTORY_DIR_ENV];
 
 type RegisteredCommand = {

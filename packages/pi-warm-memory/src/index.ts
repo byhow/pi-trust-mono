@@ -2,11 +2,6 @@ import { readFile, realpath } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
 import {
   ARCHIVE_LIMITS,
   buildArchivePrompt,
@@ -16,6 +11,11 @@ import {
 } from "./commands/archive-core.ts";
 import { runRecall } from "./commands/recall-core.ts";
 import { gatherGitContext } from "./git-context.ts";
+import type {
+  HostContext,
+  HostExtensionAPI,
+  HostToolDefinition,
+} from "./host.ts";
 import {
   ALLOW_GIT_TRACKING_ENV,
   HISTORY_DIR_ENV,
@@ -69,13 +69,10 @@ type ArchiveToolDetails = {
   readonly locator?: string;
 };
 
-type CrossHostArchiveTool = ToolDefinition<
+type CrossHostArchiveTool = HostToolDefinition<
   typeof archiveToolParams,
   ArchiveToolDetails
-> & {
-  readonly approval: "write";
-  readonly loadMode: "essential";
-};
+>;
 
 const textResult = (
   text: string,
@@ -148,9 +145,9 @@ const splitCommandArguments = (args: string): readonly string[] =>
   args.trim() ? args.trim().split(/\s+/) : [];
 
 const archiveSession = async (
-  api: ExtensionAPI,
+  api: HostExtensionAPI,
   args: string,
-  ctx: ExtensionCommandContext,
+  ctx: HostContext,
 ): Promise<void> => {
   if (!ctx.sessionManager.getSessionFile()) {
     ctx.ui.notify("/archive-session requires a persisted session.", "error");
@@ -186,9 +183,9 @@ const archiveSession = async (
 };
 
 const recall = async (
-  api: ExtensionAPI,
+  api: HostExtensionAPI,
   args: string,
-  ctx: ExtensionCommandContext,
+  ctx: HostContext,
 ): Promise<void> => {
   try {
     const location = resolveHistoryLocation(
@@ -207,7 +204,7 @@ const recall = async (
 };
 
 /** Register only the shared public extension primitives supported by both hosts. */
-export default function warmMemoryExtension(api: ExtensionAPI): void {
+export default function warmMemoryExtension(api: HostExtensionAPI): void {
   api.registerTool(warmMemoryArchiveTool);
   api.registerCommand("archive-session", {
     description:

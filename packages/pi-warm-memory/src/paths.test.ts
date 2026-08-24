@@ -1,6 +1,11 @@
 import { isAbsolute, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { DEFAULT_HISTORY_DIR, resolveHistoryLocation } from "./paths.ts";
+import {
+  allowsGitTracking,
+  DEFAULT_HISTORY_DIR,
+  InvalidHistoryPathError,
+  resolveHistoryLocation,
+} from "./paths.ts";
 
 describe("resolveHistoryLocation", () => {
   test("defaults to <cwd>/.pi/history when no adapter configuration is supplied", () => {
@@ -37,5 +42,24 @@ describe("resolveHistoryLocation", () => {
     expect(resolveHistoryLocation(cwd, "").path).toBe(
       resolve(cwd, DEFAULT_HISTORY_DIR),
     );
+  });
+
+  test.each([
+    ["", undefined],
+    ["/home/me/project\nmalicious", undefined],
+    ["/home/me/project", "bad\npath"],
+    ["/home/me/project", "../outside"],
+    ["/home/me/project", "/"],
+  ])("rejects unsafe cwd/config pair %#", (cwd, configured) => {
+    expect(() => resolveHistoryLocation(cwd, configured)).toThrow(
+      InvalidHistoryPathError,
+    );
+  });
+
+  test("requires an explicit Git tracking opt-in", () => {
+    expect(allowsGitTracking(undefined)).toBe(false);
+    expect(allowsGitTracking("0")).toBe(false);
+    expect(allowsGitTracking("TRUE")).toBe(true);
+    expect(allowsGitTracking("1")).toBe(true);
   });
 });

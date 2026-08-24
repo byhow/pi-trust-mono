@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import type { GitContext } from "../git-context.ts";
 import { frameUntrustedData } from "../prompt-frame.ts";
+import { hasControlCharacter } from "../text-safety.ts";
 
 /** The append-only index header, written once as line 1 of index.jsonl. */
 export const INDEX_HEADER = '{"version":1,"kind":"thread-index","entries":[]}';
@@ -53,9 +54,6 @@ export const parseArchiveArgs = (
   return { packetKind, instruction };
 };
 
-const isSingleLine = (value: string): boolean =>
-  !/[\u0000-\u001f\u007f]/u.test(value);
-
 const parseText = (
   value: unknown,
   maxLength: number,
@@ -64,7 +62,11 @@ const parseText = (
   if (value === undefined && !required) return undefined;
   if (typeof value !== "string") return undefined;
   const text = value.trim();
-  if ((required && !text) || text.length > maxLength || !isSingleLine(text)) {
+  if (
+    (required && !text) ||
+    text.length > maxLength ||
+    hasControlCharacter(text)
+  ) {
     return undefined;
   }
   return text;

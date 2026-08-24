@@ -1,4 +1,5 @@
 import { isAbsolute, parse, relative, resolve } from "node:path";
+import { hasControlCharacter } from "./text-safety.ts";
 
 /** Default private history location, relative to the project root. */
 export const DEFAULT_HISTORY_DIR = ".pi/history";
@@ -21,9 +22,6 @@ export class InvalidHistoryPathError extends Error {
     this.name = "InvalidHistoryPathError";
   }
 }
-
-const hasControlCharacter = (value: string): boolean =>
-  /[\u0000-\u001f\u007f]/u.test(value);
 
 const isWithin = (parent: string, child: string): boolean => {
   const fromParent = relative(parent, child);
