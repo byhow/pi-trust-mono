@@ -1,0 +1,73 @@
+{
+  "name": "pi-harness-lint",
+  "version": "0.1.0",
+  "description": "Deterministic static linting for explicit agent-harness capability descriptors.",
+  "type": "module",
+  "bin": {
+    "pi-harness-lint": "./src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./extension": "./src/extension.ts"
+  },
+  "files": [
+    "src/cli.ts",
+    "src/extension.ts",
+    "src/host.ts",
+    "src/index.ts",
+    "src/lint.ts",
+    "src/types.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "author": "byhow",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/byhow/pi-trust-mono.git",
+    "directory": "packages/pi-harness-lint"
+  },
+  "keywords": [
+    "agent-harness",
+    "lint",
+    "pi-package",
+    "security"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ]
+  },
+  "omp": {
+    "extensions": [
+      "./src/extension.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@oh-my-pi/pi-coding-agent": "17.4.1 || 18.0.3"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@oh-my-pi/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "typebox": "1.3.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.10"
+  }
+}
