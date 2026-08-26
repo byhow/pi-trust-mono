@@ -18,7 +18,7 @@
     "verify:pack": "node scripts/verify-packed-packages.mjs",
     "verify:registration": "node scripts/verify-registration-matrix.mjs",
     "verify:behavioral-host": "node scripts/verify-behavioral-host-matrix.mjs",
-    "verify:product-integration": "bun run scripts/verify-product-integration.ts",
+    "verify:product-integration": "node scripts/verify-product-integration.mjs",
     "verify:lockfile": "node scripts/verify-public-lockfile.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",

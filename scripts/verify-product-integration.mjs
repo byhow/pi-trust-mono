@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -15,8 +15,7 @@ if (!sisyphusBinary || !modelPickerBinary) {
   );
 }
 
-const sha256 = (value: string): string =>
-  createHash("sha256").update(value).digest("hex");
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-product-integration-"));
 try {
