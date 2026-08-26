@@ -138,8 +138,8 @@ if (host === "omp") {
 const commandType = host === "omp" ? "get_available_commands" : "get_commands";
 const hostArgs =
   host === "omp"
-    ? ["--mode", "rpc", "--model", "fixture/fixture"]
-    : ["--mode", "rpc", "--approve"];
+    ? ["--mode", "rpc", "--model", "fixture/fixture", "--no-session"]
+    : ["--mode", "rpc", "--approve", "--no-session"];
 
 const queryCommands = () => {
   const { promise, resolve: resolveResult, reject } = Promise.withResolvers();
@@ -191,6 +191,70 @@ const queryCommands = () => {
   return promise;
 };
 
+const invokeCommandExpectingNotification = (message, expectedMessage) => {
+  const { promise, resolve: resolveResult, reject } = Promise.withResolvers();
+  const child = spawn(hostBinary, hostArgs, {
+    cwd: work,
+    env: { ...isolatedEnvironment, PI_WARM_HISTORY_DIR: "/" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let settled = false;
+  const finish = (error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    child.kill("SIGTERM");
+    if (error) reject(error);
+    else resolveResult();
+  };
+  const timeout = setTimeout(
+    () =>
+      finish(new Error(`${host}: handler invocation timed out for ${message}`)),
+    20_000,
+  );
+
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString("utf8");
+    const lines = stdout.split("\n");
+    stdout = lines.pop() ?? "";
+    for (const line of lines) {
+      try {
+        const frame = JSON.parse(line);
+        if (
+          frame.type === "extension_ui_request" &&
+          frame.method === "notify" &&
+          frame.message === expectedMessage
+        ) {
+          finish();
+        } else if (
+          frame.id === "invoke" &&
+          frame.type === "response" &&
+          frame.success === false
+        ) {
+          finish(
+            new Error(`${host}: command invocation was rejected: ${message}`),
+          );
+        }
+      } catch {
+        // Host startup banners are not RPC frames.
+      }
+    }
+  });
+  child.on("error", (error) => finish(error));
+  child.on("close", (code) => {
+    if (!settled && code !== 0 && code !== null && code !== 143) {
+      finish(new Error(`${host}: RPC host exited during ${message}`));
+    }
+  });
+  setTimeout(() => {
+    child.stdin.write(
+      `${JSON.stringify({ id: "invoke", type: "prompt", message })}\n`,
+    );
+  }, 500);
+  return promise;
+};
+
 const commands = await queryCommands();
 const registered = new Set(commands.map((command) => command.name));
 for (const expected of expectedCommands) {
@@ -198,6 +262,14 @@ for (const expected of expectedCommands) {
     throw new Error(`${host}: command not registered: ${expected}`);
   }
 }
+await invokeCommandExpectingNotification(
+  "/archive-session fixture",
+  "/archive-session requires a persisted session.",
+);
+await invokeCommandExpectingNotification(
+  "/recall fixture",
+  "The configured warm-memory archive path is unsafe.",
+);
 console.log(
-  `verify-host-matrix: ${host} loaded ${extensionPackages.join(", ")} and registered ${[...expectedCommands].sort().join(", ")}`,
+  `verify-host-matrix: ${host} loaded ${extensionPackages.join(", ")}, registered ${[...expectedCommands].sort().join(", ")}, and invoked warm-memory handlers`,
 );

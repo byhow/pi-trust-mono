@@ -249,7 +249,10 @@ const ensurePrivateIgnore = async (root: string): Promise<void> => {
       constants.O_RDONLY | constants.O_NOFOLLOW,
     );
     try {
-      await assertRegularPrivateFile(handle, 4 * 1024);
+      const size = await assertRegularPrivateFile(handle, 4 * 1024);
+      if ((await readExact(handle, size)) !== PRIVATE_IGNORE) {
+        throw new Error("unsafe private archive marker");
+      }
     } finally {
       await handle.close();
     }
