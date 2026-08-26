@@ -7,7 +7,6 @@ const probePi = (api: PiExtensionAPI): void => {
     description: "compile-time probe",
     async handler() {},
   });
-  void api.exec("/absolute/model-picker", ["--version"]);
   api.sendUserMessage("probe");
 };
 
@@ -16,7 +15,6 @@ const probeOmp = (api: OmpExtensionAPI): void => {
     description: "compile-time probe",
     async handler() {},
   });
-  void api.exec("/absolute/model-picker", ["--version"]);
   api.sendUserMessage("probe");
 };
 

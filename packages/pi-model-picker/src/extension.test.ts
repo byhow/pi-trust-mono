@@ -8,7 +8,13 @@ const selection: ModelPickerResult = {
     contract: "model-picker.selection",
     version: 1,
     source: "snapshot",
-    request: { task: "agent", agent: null, filter: null, limit: 1 },
+    request: {
+      task: "agent",
+      agent: null,
+      filter: null,
+      limit: 1,
+      weights: { speed: 0.4, price: 0.35, context: 0.25 },
+    },
     count: 1,
     choices: [
       {
@@ -38,7 +44,6 @@ const register = (run: (...args: never[]) => Promise<ModelPickerResult>) => {
   let tool: RegisteredTool | undefined;
   let command: RegisteredCommand | undefined;
   const sendUserMessage = vi.fn();
-  const exec = vi.fn();
   createPiModelPickerExtension(run as never)({
     registerTool(value: RegisteredTool) {
       tool = value;
@@ -46,11 +51,10 @@ const register = (run: (...args: never[]) => Promise<ModelPickerResult>) => {
     registerCommand(_name: string, value: RegisteredCommand) {
       command = value;
     },
-    exec,
     sendUserMessage,
   } as never);
   if (!tool || !command) throw new Error("adapter registration incomplete");
-  return { command, exec, sendUserMessage, tool };
+  return { command, sendUserMessage, tool };
 };
 
 const commandContext = () => ({
@@ -71,9 +75,11 @@ describe("piModelPickerExtension", () => {
     );
     expect(result).toMatchObject({ details: selection });
     expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({ exec: registered.exec }),
       { task: "agent", limit: 1 },
       "/work",
+      undefined,
+      undefined,
+      undefined,
     );
   });
 
@@ -97,11 +103,7 @@ describe("piModelPickerExtension", () => {
     const run = vi.fn(async () => selection);
     const registered = register(run);
     await registered.command.handler("", commandContext() as never);
-    expect(run).toHaveBeenCalledWith(
-      expect.anything(),
-      { task: "agent" },
-      "/work",
-    );
+    expect(run).toHaveBeenCalledWith({ task: "agent" }, "/work");
     expect(registered.sendUserMessage).toHaveBeenCalledWith(
       expect.stringContaining("canonical recommendation data"),
     );

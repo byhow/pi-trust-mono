@@ -22,7 +22,7 @@ const TASKS = new Set([
 ]);
 
 export const MODEL_SELECTION_SCHEMA_SHA256 =
-  "35a735b2efa9a6232d6de52f68f5b33b2292b407d592bfbd819185f78e46b68d";
+  "62bfd7410b1c639c5eb4372a2e26bd561735151ff0d834233626461918c40f82";
 
 export const resolveModelPickerBinary = (
   configured: string | undefined,

@@ -33,6 +33,11 @@ export type ModelSelectionEnvelope = {
       | null;
     readonly filter: string | null;
     readonly limit: number;
+    readonly weights: {
+      readonly speed: number;
+      readonly price: number;
+      readonly context: number;
+    };
   };
   readonly count: number;
   readonly choices: readonly {
@@ -41,7 +46,7 @@ export type ModelSelectionEnvelope = {
     readonly score: number;
     readonly reasons: readonly string[];
     readonly contextWindow: number;
-    readonly outputPerMillion: number;
+    readonly outputPerMillion: number | null;
     readonly bestThroughput: number | null;
   }[];
 };

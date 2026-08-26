@@ -45,10 +45,7 @@ type CrossHostTool = ToolDefinition<typeof requestSchema, ModelPickerResult> & {
   readonly loadMode: "discoverable";
 };
 
-const createModelPickerTool = (
-  api: Pick<ExtensionAPI, "exec">,
-  run: typeof runModelPicker,
-): CrossHostTool => ({
+const createModelPickerTool = (run: typeof runModelPicker): CrossHostTool => ({
   name: "model_picker",
   label: "Recommend a model",
   description:
@@ -56,8 +53,8 @@ const createModelPickerTool = (
   parameters: requestSchema,
   approval: "exec",
   loadMode: "discoverable",
-  async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-    const result = await run(api, params, ctx.cwd);
+  async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    const result = await run(params, ctx.cwd, undefined, undefined, signal);
     return {
       content: [{ type: "text", text: resultText(result) }],
       details: result,
@@ -69,13 +66,13 @@ const createModelPickerTool = (
 export const createPiModelPickerExtension =
   (run: typeof runModelPicker = runModelPicker) =>
   (api: ExtensionAPI): void => {
-    api.registerTool(createModelPickerTool(api, run));
+    api.registerTool(createModelPickerTool(run));
     api.registerCommand("model-picker", {
       description:
         "Recommend a model for agent, coding, review, vision, budget, long-context, or fast work.",
       async handler(args, ctx) {
         const task = args.trim() || "agent";
-        const result = await run(api, { task } as ModelPickerRequest, ctx.cwd);
+        const result = await run({ task } as ModelPickerRequest, ctx.cwd);
         if (!result.ok) {
           ctx.ui.notify(resultText(result), "error");
           return;
