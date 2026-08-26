@@ -70,6 +70,28 @@ describe("persistArchive", () => {
     });
   });
 
+  test("rejects an existing non-protective private Git marker", async () => {
+    const cwd = await createProject();
+    const historyRoot = join(cwd, ".pi", "history");
+    await mkdir(historyRoot, { recursive: true, mode: 0o700 });
+    await writeFile(join(historyRoot, ".gitignore"), "packets/\n", {
+      mode: 0o600,
+    });
+
+    const result = await persistArchive(
+      resolveHistoryLocation(cwd, undefined),
+      "session-123",
+      timestamp,
+      "fixture-project",
+      undefined,
+      draft,
+    );
+    expect(result.status).toBe("unsafe");
+    await expect(stat(join(historyRoot, "index.jsonl"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   test("does not create a packet when an existing index is corrupt", async () => {
     const cwd = await createProject();
     const historyRoot = join(cwd, ".pi", "history");
