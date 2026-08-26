@@ -1,12 +1,12 @@
 import { readFile, realpath } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Type } from "typebox";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import {
   ARCHIVE_LIMITS,
   buildArchivePrompt,

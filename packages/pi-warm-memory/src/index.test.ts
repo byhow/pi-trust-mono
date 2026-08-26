@@ -1,11 +1,10 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import warmMemoryExtension from "./index.ts";
+import warmMemoryExtension, { warmMemoryArchiveTool } from "./index.ts";
 import { HISTORY_DIR_ENV } from "./paths.ts";
 
-const header = '{"version":1,"kind":"thread-index","entries":[]}';
 const originalHistoryDir = process.env[HISTORY_DIR_ENV];
 
 type RegisteredCommand = {
@@ -92,5 +91,41 @@ describe("warmMemoryExtension", () => {
         "Archive this session as a **checkpoint** packet.",
       ),
     );
+  });
+
+  test("executes the registered archive tool against the real private store", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-warm-tool-"));
+    const result = await warmMemoryArchiveTool.execute(
+      "call-1",
+      {
+        packetKind: "handoff",
+        topic: "trust-plane integration",
+        summary: "Prepared the verified policy integration.",
+        tags: ["trust", "handoff"],
+        files: ["src/trust.ts"],
+        nextStep: "Wire the enforcement call.",
+        goal: "Preserve the implementation state.",
+        decisions: ["Use fail-closed policy evaluation."],
+        commands: ["bun test"],
+        blockers: [],
+        openQuestions: [],
+        changes: ["Added bounded trust input."],
+        pendingDecisions: [],
+      },
+      new AbortController().signal,
+      undefined,
+      commandContext(cwd, true),
+    );
+
+    expect(result.details).toMatchObject({
+      status: "success",
+      locator: expect.stringMatching(/^packets\//u),
+    });
+    const locator = result.details.locator;
+    if (!locator) throw new Error("Expected archive locator.");
+    const packet = await readFile(join(cwd, ".pi/history", locator), "utf8");
+    const index = await readFile(join(cwd, ".pi/history/index.jsonl"), "utf8");
+    expect(packet).toContain("Prepared the verified policy integration.");
+    expect(index).toContain(`"path":"${locator}"`);
   });
 });

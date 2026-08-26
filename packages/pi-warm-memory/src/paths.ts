@@ -23,7 +23,10 @@ export class InvalidHistoryPathError extends Error {
 }
 
 const hasControlCharacter = (value: string): boolean =>
-  /[\u0000-\u001f\u007f]/u.test(value);
+  Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 0x20 || codePoint === 0x7f;
+  });
 
 const isWithin = (parent: string, child: string): boolean => {
   const fromParent = relative(parent, child);

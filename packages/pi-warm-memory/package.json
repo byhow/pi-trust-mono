@@ -26,7 +26,6 @@
     "src/commands/archive-core.ts",
     "src/commands/recall-core.ts",
     "src/search/corpus.ts",
-    "src/search/persistence.ts",
     "templates",
     "rules",
     "README.md",
@@ -49,6 +48,12 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
+    ]
+  },
+  "hostConformance": {
+    "commands": [
+      "archive-session",
+      "recall"
     ]
   },
   "peerDependencies": {

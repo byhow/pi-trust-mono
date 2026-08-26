@@ -1,5 +1,17 @@
 # pi-warm-memory
 
+## Unreleased
+
+- Make `warm_memory_archive` the only persistence path for `/archive-session`,
+  with bounded runtime validation, secret rejection, private files, and
+  append-only index updates.
+- Use one shared Pi/OMP extension entrypoint and verify the exact supported host
+  matrix against the packed package.
+- Remove unused embedding, hybrid-search, and persisted-index seams. Recall now
+  has one implemented search mode: an in-memory BM25 index rebuilt from durable
+  packet metadata.
+- Align the shipped packet templates and documentation with actual tool output.
+
 ## 0.1.0
 
 ### Minor Changes

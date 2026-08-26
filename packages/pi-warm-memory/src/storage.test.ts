@@ -1,8 +1,9 @@
 import {
+  chmod,
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
+  readFile,
   stat,
   symlink,
   writeFile,
@@ -32,8 +33,7 @@ const draft: ArchiveDraft = {
 
 const timestamp = "2026-08-23T15:00:00.000Z";
 
-const createProject = async () =>
-  mkdtemp(join(tmpdir(), "pi-warm-storage-"));
+const createProject = async () => mkdtemp(join(tmpdir(), "pi-warm-storage-"));
 
 describe("persistArchive", () => {
   test("creates a private packet and one append-only index record", async () => {
@@ -57,7 +57,9 @@ describe("persistArchive", () => {
     expect(packet).toContain("- Thread ID: session-123");
     expect(packet).toContain("- Repository: fixture-project");
 
-    const indexLines = (await readFile(join(historyRoot, "index.jsonl"), "utf8"))
+    const indexLines = (
+      await readFile(join(historyRoot, "index.jsonl"), "utf8")
+    )
       .trimEnd()
       .split("\n");
     expect(indexLines).toHaveLength(2);
@@ -119,7 +121,9 @@ describe("persistArchive", () => {
       draft,
     );
     expect(result.status).toBe("success");
-    await expect(stat(join(cwd, ".pi", "history", ".gitignore"))).rejects.toMatchObject({
+    await expect(
+      stat(join(cwd, ".pi", "history", ".gitignore")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
@@ -151,5 +155,109 @@ describe("persistArchive", () => {
         )
       ).status,
     ).toBe("collision");
+  });
+
+  test("renders checkpoint packets in an explicit absolute archive", async () => {
+    const cwd = await createProject();
+    const absoluteRoot = await mkdtemp(join(tmpdir(), "pi-warm-global-"));
+    const result = await persistArchive(
+      resolveHistoryLocation(cwd, absoluteRoot),
+      "session-checkpoint",
+      "2026-08-23T15:01:00.000Z",
+      "fixture-project",
+      undefined,
+      {
+        ...draft,
+        packetKind: "checkpoint",
+        changes: ["Added a bounded storage writer."],
+        risk: "The rollout is not active.",
+        pendingDecisions: ["Choose the release window."],
+      },
+    );
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    const packet = await readFile(join(absoluteRoot, result.locator), "utf8");
+    expect(packet).toContain("# Checkpoint Packet");
+    expect(packet).toContain("- Current Risk: The rollout is not active.");
+    expect(packet).toContain("  - Added a bounded storage writer.");
+  });
+
+  test.each([
+    ["", timestamp, "fixture-project"],
+    ["session-123", "bad-timestamp", "fixture-project"],
+    ["session-123", timestamp, "bad\nrepository"],
+  ])(
+    "rejects unsafe derived metadata %#",
+    async (sessionId, at, repository) => {
+      const cwd = await createProject();
+      expect(
+        (
+          await persistArchive(
+            resolveHistoryLocation(cwd, undefined),
+            sessionId,
+            at,
+            repository,
+            undefined,
+            draft,
+          )
+        ).status,
+      ).toBe("unsafe");
+    },
+  );
+
+  test("appends safely when the existing index lacks a final newline", async () => {
+    const cwd = await createProject();
+    const location = resolveHistoryLocation(cwd, undefined);
+    await persistArchive(
+      location,
+      "session-123",
+      timestamp,
+      "fixture-project",
+      undefined,
+      draft,
+    );
+    const indexPath = join(cwd, ".pi", "history", "index.jsonl");
+    await writeFile(
+      indexPath,
+      (await readFile(indexPath, "utf8")).trimEnd(),
+      "utf8",
+    );
+    const second = await persistArchive(
+      location,
+      "session-456",
+      "2026-08-23T15:02:00.000Z",
+      "fixture-project",
+      undefined,
+      { ...draft, topic: "second packet" },
+    );
+    expect(second.status).toBe("success");
+    expect(
+      (await readFile(indexPath, "utf8")).trimEnd().split("\n"),
+    ).toHaveLength(3);
+  });
+
+  test("rejects a group-writable index", async () => {
+    const cwd = await createProject();
+    const historyRoot = join(cwd, ".pi", "history");
+    await mkdir(historyRoot, { recursive: true, mode: 0o700 });
+    const indexPath = join(historyRoot, "index.jsonl");
+    await writeFile(
+      indexPath,
+      '{"version":1,"kind":"thread-index","entries":[]}\n',
+      { mode: 0o660 },
+    );
+    await chmod(indexPath, 0o660);
+    expect(
+      (
+        await persistArchive(
+          resolveHistoryLocation(cwd, undefined),
+          "session-123",
+          timestamp,
+          "fixture-project",
+          undefined,
+          draft,
+        )
+      ).status,
+    ).toBe("unsafe");
   });
 });

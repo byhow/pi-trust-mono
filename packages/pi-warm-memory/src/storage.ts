@@ -1,14 +1,14 @@
 import { constants } from "node:fs";
 import {
+  type FileHandle,
   lstat,
   mkdir,
   open,
   realpath,
   unlink,
-  type FileHandle,
 } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
-import { INDEX_HEADER, type ArchiveDraft } from "./commands/archive-core.ts";
+import { type ArchiveDraft, INDEX_HEADER } from "./commands/archive-core.ts";
 import { allowsGitTracking, type HistoryLocation } from "./paths.ts";
 
 const MAX_INDEX_BYTES = 4 * 1024 * 1024;
@@ -295,10 +295,14 @@ const commitIndex = async (
   }
 };
 
+const hasControlCharacter = (value: string): boolean =>
+  Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 0x20 || codePoint === 0x7f;
+  });
+
 const safeMetadata = (value: string, maxLength: number): boolean =>
-  value.length > 0 &&
-  value.length <= maxLength &&
-  !/[\u0000-\u001f\u007f]/u.test(value);
+  value.length > 0 && value.length <= maxLength && !hasControlCharacter(value);
 
 /** Atomically creates a packet before committing its single append-only index record. */
 export const persistArchive = async (

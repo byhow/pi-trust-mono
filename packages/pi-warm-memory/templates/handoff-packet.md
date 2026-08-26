@@ -1,7 +1,6 @@
 # Handoff Packet
 
 - Thread ID:
-- Parent Thread ID:
 - Timestamp:
 - Repository:
 - Topic:

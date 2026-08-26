@@ -28,11 +28,10 @@ HOT ──session ends──► WARM ──aging/relevance──► COLD
   continues fresh. (A **retrieval protocol** rule reminds it to do this before non-trivial
   work on an existing topic.)
 
-No server, no external vector DB. The durable store is still an append-only JSONL you can
-`grep` and `git diff` — that stays the source of truth. Search runs over a **disposable
-in-memory index** ([Orama](https://github.com/oramasearch/orama), pure JS) rebuilt from the
-JSONL on demand; BM25 keyword ranking is the default and embeddings/hybrid search are
-opt-in. The LLM does the summarization (the hard part); retrieval is cheap and always fresh.
+No server, no external vector DB. The durable source of truth is append-only
+`index.jsonl` plus Markdown packet files. Recall rebuilds a disposable in-memory
+[Orama](https://github.com/oramasearch/orama) BM25 index on demand. There is no
+embedding provider, vector cache, or hidden synchronization path.
 
 ## Install
 
@@ -76,10 +75,10 @@ Same mechanism, lighter template — focused on *what changed since the last che
 
 ### `/recall <query> [--tags a,b] [--since YYYY-MM-DD] [--kind handoff|checkpoint]`
 
-Searches prior packets and surfaces the most relevant, so a fresh session can continue
-where an old one left off. Ranking (BM25) runs in code; the command returns the ranked
-packet paths plus instructions telling the agent which 1–3 to `read` and reconstruct —
-it doesn't dump every packet into context.
+Searches prior packets and surfaces the most relevant packet metadata plus up to three
+bounded packet bodies, so a fresh session can continue where an old one left off.
+Ranking runs locally with BM25; archived bodies are framed as untrusted data before
+they reach the model.
 
 ```
 /recall auth refactor
@@ -102,7 +101,6 @@ manual reindex step.
 # Handoff Packet
 
 - Thread ID:
-- Parent Thread ID:
 - Timestamp:
 - Repository:
 - Topic:
@@ -136,15 +134,19 @@ manual reindex step.
 
 ## How it works
 
-`/archive-session` is a **prompt-builder, not a summarizer** — the model that lived the
-session summarizes it (one call, no context transfer, no drift between "what the session
-did" and "what the packet says"). The command:
+`/archive-session` is a **prompt-builder, not a summarizer**. The model that lived
+the session derives bounded structured fields from the conversation. The command:
 
-1. Parses the packet kind (`handoff` / `checkpoint`) and the user instruction.
-2. Collects session identity plus Git repo / branch / commit / files-touched context.
-3. Reads the matching template and prompts the model to fill it from the conversation, write the packet to `history/packets/YYYY/MM/`, and append **one** JSON line to the index. Local absolute working-directory paths are not stored by default.
+1. Requires a persisted host session.
+2. Parses the packet kind (`handoff` / `checkpoint`) and user instruction.
+3. Collects session identity and bounded Git repository context.
+4. Reads the matching packet template and asks the model to call
+   `warm_memory_archive` exactly once.
+5. The extension-owned tool validates lengths, relative paths, line structure, and
+   common secret patterns before writing a private packet and atomically appending
+   its index reference.
 
-The agent then writes the packet + index entry with its normal file tooling.
+The model never writes archive or index files through normal file/shell tools.
 
 ## The index (`index.jsonl`)
 
@@ -180,10 +182,11 @@ The history directory is configurable through the `PI_WARM_HISTORY_DIR` environm
 
 | Setting | Env | Default | Notes |
 |---|---|---|---|
-| N/A | `PI_WARM_HISTORY_DIR` | `.pi/history` (project-local) | Absolute path, or relative to the project root. |
+| N/A | `PI_WARM_HISTORY_DIR` | `.pi/history` (project-local) | Absolute path, or a path confined below the project root. |
+| N/A | `PI_WARM_ALLOW_GIT_TRACKING` | unset | Set to `1` or `true` only to opt out of the default private `.gitignore`. |
 
 ```sh
-# project-local (default, shareable via git): .pi/history
+# project-local and private by default: .pi/history
 # user-global: export PI_WARM_HISTORY_DIR="$HOME/.pi/history"
 ```
 

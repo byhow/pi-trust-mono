@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open, realpath, type FileHandle } from "node:fs/promises";
+import { type FileHandle, open, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CorpusDocument } from "./search/corpus.ts";
 
@@ -137,6 +137,12 @@ const readPacket = async (
   }
 };
 
+const hasControlCharacter = (value: string): boolean =>
+  Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 0x20 || codePoint === 0x7f;
+  });
+
 const boundedString = (
   value: unknown,
   maxLength: number,
@@ -146,7 +152,7 @@ const boundedString = (
   if (
     typeof value !== "string" ||
     value.length > maxLength ||
-    /[\u0000-\u001f\u007f]/u.test(value)
+    hasControlCharacter(value)
   ) {
     return undefined;
   }

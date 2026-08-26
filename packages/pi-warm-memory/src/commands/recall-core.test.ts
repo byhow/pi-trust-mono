@@ -39,6 +39,15 @@ describe("parseArgs", () => {
     });
   });
 
+  test("parses date and packet-kind filters", () => {
+    expect(
+      parseArgs(["migration", "--since", "2026-01-01", "--kind", "checkpoint"]),
+    ).toEqual({
+      query: "migration",
+      filters: { since: "2026-01-01", source: "checkpoint" },
+    });
+  });
+
   test("returns an empty query without terms", () => {
     expect(parseArgs([])).toEqual({ query: "", filters: {} });
   });
@@ -77,6 +86,13 @@ describe("runRecall", () => {
     expect(await runRecall([], historyDir)).toBe(HELP);
   });
 
+  test("rejects an oversized query before indexing", async () => {
+    const historyDir = await archive([header, ref()]);
+    expect(await runRecall(["x".repeat(501)], historyDir)).toContain(
+      "Query validation failed",
+    );
+  });
+
   test("distinguishes a missing archive from a corrupt archive", async () => {
     const missing = await mkdtemp(join(tmpdir(), "pi-warm-none-"));
     expect(await runRecall(["auth"], missing)).toContain(
@@ -84,6 +100,20 @@ describe("runRecall", () => {
     );
     const corrupt = await archive(['{"version":2,"kind":"thread-index"}']);
     expect(await runRecall(["auth"], corrupt)).toContain("not index-v1 data");
+  });
+
+  test("distinguishes an unreadable index and an archive without packet files", async () => {
+    const unreadable = await mkdtemp(join(tmpdir(), "pi-warm-unreadable-"));
+    await mkdir(join(unreadable, "index.jsonl"));
+    expect(await runRecall(["auth"], unreadable)).toContain(
+      "could not be read safely",
+    );
+
+    const empty = await archive([
+      header,
+      ref({ path: "packets/2026/06/missing.md" }),
+    ]);
+    expect(await runRecall(["auth"], empty)).toContain("No readable packets");
   });
 
   test("surfaces framed results with usable packet locators", async () => {

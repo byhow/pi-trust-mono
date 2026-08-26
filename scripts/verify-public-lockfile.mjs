@@ -43,8 +43,7 @@ for (const [packagePath, metadata] of Object.entries(lock.packages ?? {})) {
   if (typeof metadata.integrity !== "string" || !metadata.integrity) {
     // Upstream pi-coding-agent uses a shrinkwrap that causes npm to omit integrity fields for its transitive dependencies.
     if (
-      packagePath &&
-      packagePath.includes(
+      packagePath?.includes(
         "node_modules/@earendil-works/pi-coding-agent/node_modules/",
       )
     ) {

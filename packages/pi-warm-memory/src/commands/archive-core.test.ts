@@ -1,11 +1,14 @@
 import { describe, expect, test } from "vitest";
 import type { GitContext } from "../git-context.ts";
 import {
+  ARCHIVE_LIMITS,
   type ArchivePromptInput,
   buildArchivePrompt,
+  containsPotentialSecret,
   INDEX_HEADER,
   parseArchiveArgs,
   TEMPLATE_FILE,
+  validateArchiveDraft,
 } from "./archive-core.ts";
 
 const timestamp = "2026-07-09T12:34:56.789Z";
@@ -28,6 +31,23 @@ const baseInput = (
   ...over,
 });
 
+const validDraft = {
+  packetKind: "handoff",
+  topic: "auth refactor",
+  summary: "Split validation from key rotation.",
+  tags: ["auth", "backend"],
+  files: ["src/auth.ts"],
+  nextStep: "Run the rollout checklist.",
+  goal: "Finish the refactor.",
+  decisions: ["Keep validation pure."],
+  commands: ["npm test"],
+  blockers: [],
+  openQuestions: [],
+  changes: [],
+  risk: "A rollback is still required.",
+  pendingDecisions: [],
+} as const;
+
 describe("parseArchiveArgs", () => {
   test("preserves handoff and checkpoint argument behavior", () => {
     expect(parseArchiveArgs(["handoff", "the", "work"])).toEqual({
@@ -38,6 +58,87 @@ describe("parseArchiveArgs", () => {
       packetKind: "checkpoint",
       instruction: "mid refactor",
     });
+  });
+});
+
+describe("validateArchiveDraft", () => {
+  test("accepts bounded structured data and removes duplicate list items", () => {
+    const result = validateArchiveDraft({
+      ...validDraft,
+      tags: ["auth", "auth"],
+      decisions: ["Keep validation pure.", "Keep validation pure."],
+    });
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) {
+      expect(result.value.tags).toEqual(["auth"]);
+      expect(result.value.decisions).toEqual(["Keep validation pure."]);
+    }
+  });
+
+  test("defaults optional arrays and omits absent optional text", () => {
+    const result = validateArchiveDraft({
+      packetKind: "checkpoint",
+      topic: "checkpoint",
+      summary: "State is preserved.",
+      tags: [],
+      files: [],
+      nextStep: "Continue.",
+    });
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        packetKind: "checkpoint",
+        topic: "checkpoint",
+        summary: "State is preserved.",
+        tags: [],
+        files: [],
+        nextStep: "Continue.",
+        decisions: [],
+        commands: [],
+        blockers: [],
+        openQuestions: [],
+        changes: [],
+        pendingDecisions: [],
+      },
+    });
+  });
+
+  test.each([
+    null,
+    [],
+    { ...validDraft, packetKind: "memo" },
+    { ...validDraft, topic: "" },
+    { ...validDraft, topic: "x".repeat(ARCHIVE_LIMITS.topic + 1) },
+    { ...validDraft, topic: "bad\nvalue" },
+    { ...validDraft, tags: "auth" },
+    { ...validDraft, tags: Array(ARCHIVE_LIMITS.tags + 1).fill("auth") },
+    { ...validDraft, tags: ["not a tag"] },
+    { ...validDraft, files: ["/etc/passwd"] },
+    { ...validDraft, files: ["../secret"] },
+    { ...validDraft, files: ["src\\secret.ts"] },
+    { ...validDraft, decisions: [42] },
+  ])("rejects malformed packet draft %#", (value) => {
+    expect(validateArchiveDraft(value)).toEqual({ ok: false });
+  });
+
+  test.each([
+    "-----BEGIN PRIVATE KEY-----",
+    "sk-1234567890abcdefghijkl",
+    "Authorization: Bearer abcdefghijklmnop",
+    "api_key=abcdefghijklmnop",
+    "--token abcdefghijklmnop",
+    "eyJabcdefgh.eyJijklmnop.abcdefghijk",
+    "https://example.test/?signature=abcdefghijklmnop",
+  ])("rejects recognized secret material without exposing it", (value) => {
+    expect(containsPotentialSecret(value)).toBe(true);
+    expect(validateArchiveDraft({ ...validDraft, summary: value })).toEqual({
+      ok: false,
+    });
+  });
+
+  test("does not classify ordinary token terminology as a secret", () => {
+    expect(containsPotentialSecret("Refactor token validation")).toBe(false);
+    expect(containsPotentialSecret(undefined)).toBe(false);
   });
 });
 

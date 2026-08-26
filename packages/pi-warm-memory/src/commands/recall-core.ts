@@ -1,7 +1,7 @@
 import { buildPacketDocs, readPacketBodies } from "../packets.ts";
 import { frameUntrustedData } from "../prompt-frame.ts";
 import {
-  loadOrRebuild,
+  buildCorpusIndex,
   type SearchFilters,
   type SearchHit,
   searchCorpus,
@@ -83,9 +83,7 @@ export const runRecall = async (
       return "The archive index is corrupt or is not index-v1 data. Repair index.jsonl before recalling packets.";
     }
 
-    const { db, count: indexed } = await loadOrRebuild({
-      buildDocs: async () => packetDocs.docs,
-    });
+    const { db, count: indexed } = await buildCorpusIndex(packetDocs.docs);
     if (indexed === 0) {
       return "No readable packets are available in the archive yet — nothing to recall. Use /archive-session to create one.";
     }
