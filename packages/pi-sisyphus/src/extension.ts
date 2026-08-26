@@ -91,8 +91,10 @@ const descriptorSchema = Type.Object(
 const POLICY_TOOL_NAMES: Readonly<Record<string, string>> = {
   bash: "Bash",
   edit: "Edit",
+  find: "Find",
   glob: "Glob",
   grep: "Grep",
+  ls: "Ls",
   read: "Read",
   write: "Write",
 };

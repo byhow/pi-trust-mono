@@ -54,6 +54,25 @@ describe("createToolPolicyHandler", () => {
     });
   });
 
+  test.each([
+    ["find", "Find"],
+    ["ls", "Ls"],
+  ] as const)(
+    "normalizes %s for reviewed policy matching",
+    async (toolName, policyName) => {
+      const evaluate = vi.fn(async () => decision("allow"));
+      await createToolPolicyHandler(evaluate)(
+        { ...event, toolName } as never,
+        context,
+      );
+      expect(evaluate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ tool: policyName }),
+        }),
+      );
+    },
+  );
+
   test.each(["deny", "ask", "modify"] as const)(
     "blocks %s decisions",
     async (effect) => {
