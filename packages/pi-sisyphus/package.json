@@ -13,6 +13,7 @@
     "src/index.ts",
     "src/mcp.ts",
     "src/process.ts",
+    "src/resource-scope.ts",
     "src/types.ts",
     "README.md",
     "CHANGELOG.md",

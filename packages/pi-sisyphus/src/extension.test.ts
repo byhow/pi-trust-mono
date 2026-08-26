@@ -49,7 +49,11 @@ describe("createToolPolicyHandler", () => {
       version: 1,
       requestId: "call-1",
       subject: "tool-call",
-      payload: { path: "README.md", tool: "Read" },
+      payload: {
+        path: "README.md",
+        tool: "Read",
+        resourceScope: "unknown",
+      },
       context: { cwd: "/work", actor: "agent" },
     });
   });

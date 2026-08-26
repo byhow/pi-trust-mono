@@ -8,6 +8,7 @@ import type {
 import { Type } from "typebox";
 import { evaluateTrust } from "./engine.ts";
 import { vetMcp } from "./mcp.ts";
+import { classifyResourceScope } from "./resource-scope.ts";
 import type {
   McpServerDescriptor,
   McpVetResult,
@@ -100,18 +101,22 @@ const POLICY_TOOL_NAMES: Readonly<Record<string, string>> = {
 };
 const DIAGNOSTIC_TOOLS = new Set(["sisyphus_policy", "mcp_vet"]);
 
-const policyInput = (
+const policyInput = async (
   requestId: string,
   toolName: string,
   input: Readonly<Record<string, unknown>>,
   cwd: string,
-): TrustInput => ({
-  version: 1,
-  requestId,
-  subject: "tool-call",
-  payload: { ...input, tool: POLICY_TOOL_NAMES[toolName] ?? toolName },
-  context: { cwd, actor: "agent" },
-});
+): Promise<TrustInput> => {
+  const policyTool = POLICY_TOOL_NAMES[toolName] ?? toolName;
+  const resourceScope = await classifyResourceScope(policyTool, input, cwd);
+  return {
+    version: 1,
+    requestId,
+    subject: "tool-call",
+    payload: { ...input, tool: policyTool, resourceScope },
+    context: { cwd, actor: "agent" },
+  };
+};
 
 const failureReason = (evaluation: TrustEvaluation): string =>
   evaluation.ok
@@ -132,7 +137,7 @@ export const createToolPolicyHandler =
     let evaluation: TrustEvaluation;
     try {
       evaluation = await evaluate(
-        policyInput(event.toolCallId, event.toolName, input, ctx.cwd),
+        await policyInput(event.toolCallId, event.toolName, input, ctx.cwd),
       );
     } catch {
       return {
@@ -186,7 +191,7 @@ const createPolicyTool = (evaluate: typeof evaluateTrust): PolicyTool => ({
   loadMode: "discoverable",
   async execute(toolCallId, params, _signal, _onUpdate, ctx) {
     const evaluation = await evaluate(
-      policyInput(toolCallId, params.toolName, params.input, ctx.cwd),
+      await policyInput(toolCallId, params.toolName, params.input, ctx.cwd),
     );
     return {
       content: [{ type: "text", text: resultText(evaluation) }],
@@ -239,7 +244,7 @@ export const createPiSisyphusExtension =
           return;
         }
         const evaluation = await evaluate(
-          policyInput("permit-command", toolName, {}, ctx.cwd),
+          await policyInput("permit-command", toolName, {}, ctx.cwd),
         );
         if (!evaluation.ok) {
           ctx.ui.notify(failureReason(evaluation), "error");
