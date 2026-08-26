@@ -39,6 +39,7 @@ export const spawnModelPicker: ModelPickerExecutor = async (
     return await new Promise((resolve) => {
       const child = spawn(binary, [...args], {
         cwd,
+        detached: process.platform !== "win32",
         env: {
           PATH: SYSTEM_PATH,
           HOME: privateRoot,
@@ -63,6 +64,14 @@ export const spawnModelPicker: ModelPickerExecutor = async (
       };
       const abort = () => {
         killed = true;
+        if (child.pid !== undefined && process.platform !== "win32") {
+          try {
+            process.kill(-child.pid, "SIGKILL");
+            return;
+          } catch {
+            // The group may have exited between observation and the signal.
+          }
+        }
         child.kill("SIGKILL");
       };
       const timeout = setTimeout(abort, timeoutMs);

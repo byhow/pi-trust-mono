@@ -32,6 +32,7 @@ export const spawnSisyphus = async (
     return await new Promise((resolve) => {
       const child = spawn(binary, [...args], {
         cwd: privateRoot,
+        detached: process.platform !== "win32",
         env: {
           ...environment,
           PATH: SYSTEM_PATH,
@@ -47,6 +48,18 @@ export const spawnSisyphus = async (
       let outputBytes = 0;
       let killed = false;
       let settled = false;
+      const killProcessTree = () => {
+        killed = true;
+        if (child.pid !== undefined && process.platform !== "win32") {
+          try {
+            process.kill(-child.pid, "SIGKILL");
+            return;
+          } catch {
+            // The group may have exited between observation and the signal.
+          }
+        }
+        child.kill("SIGKILL");
+      };
 
       const finish = (result: SisyphusProcessResult) => {
         if (settled) return;
@@ -54,16 +67,12 @@ export const spawnSisyphus = async (
         clearTimeout(timeout);
         resolve(result);
       };
-      const timeout = setTimeout(() => {
-        killed = true;
-        child.kill("SIGKILL");
-      }, timeoutMs);
+      const timeout = setTimeout(killProcessTree, timeoutMs);
 
       child.stdout.on("data", (chunk: Buffer) => {
         outputBytes += chunk.length;
         if (outputBytes > maxOutputBytes) {
-          killed = true;
-          child.kill("SIGKILL");
+          killProcessTree();
           return;
         }
         chunks.push(chunk);
@@ -76,10 +85,7 @@ export const spawnSisyphus = async (
           stdout: killed ? "" : Buffer.concat(chunks).toString("utf8"),
         }),
       );
-      child.stdin.on("error", () => {
-        killed = true;
-        child.kill("SIGKILL");
-      });
+      child.stdin.on("error", killProcessTree);
       child.stdin.end(input);
     });
   } finally {
