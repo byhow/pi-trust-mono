@@ -36,6 +36,9 @@ jobs:
       - name: Verify package contracts
         run: npm run verify:contracts
 
+      - name: Verify manifest registrations
+        run: npm run verify:registration
+
       - name: Verify packed payloads
         run: npm run verify:pack
 

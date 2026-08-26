@@ -54,6 +54,9 @@
     "commands": [
       "archive-session",
       "recall"
+    ],
+    "tools": [
+      "warm_memory_archive"
     ]
   },
   "peerDependencies": {

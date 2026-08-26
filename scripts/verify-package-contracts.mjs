@@ -95,6 +95,29 @@ for (const entry of await readdir(packagesRoot, { withFileTypes: true })) {
         "hostConformance.commands must list unique bounded command names",
       );
     }
+    const tools = manifest.hostConformance?.tools;
+    if (
+      !Array.isArray(tools) ||
+      tools.length === 0 ||
+      new Set(tools).size !== tools.length ||
+      tools.some(
+        (tool) =>
+          typeof tool !== "string" || !/^[a-z][a-z0-9_]{0,63}$/u.test(tool),
+      )
+    ) {
+      fail(
+        packageName,
+        "hostConformance.tools must list unique bounded tool names",
+      );
+    }
+    const events = manifest.hostConformance?.events ?? [];
+    if (
+      !Array.isArray(events) ||
+      new Set(events).size !== events.length ||
+      events.some((event) => event !== "tool_call")
+    ) {
+      fail(packageName, "hostConformance.events contains an unsupported event");
+    }
     for (const [peer, version] of Object.entries(expectedPeers)) {
       if (manifest.peerDependencies?.[peer] !== version) {
         fail(

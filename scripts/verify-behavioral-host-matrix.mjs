@@ -199,5 +199,5 @@ for (const expected of expectedCommands) {
   }
 }
 console.log(
-  `verify-host-matrix: ${host} loaded ${extensionPackages.join(", ")} and registered ${[...expectedCommands].sort().join(", ")}`,
+  `verify-behavioral-host-matrix: ${host} loaded ${extensionPackages.join(", ")} and registered ${[...expectedCommands].sort().join(", ")}`,
 );

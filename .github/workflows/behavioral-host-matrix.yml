@@ -1,4 +1,4 @@
-name: Host matrix
+name: Behavioral host matrix
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 concurrency:
-  group: host-matrix-${{ github.ref }}
+  group: behavioral-host-matrix-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -41,7 +41,7 @@ jobs:
           PI_MATRIX_HOST: omp
           PI_MATRIX_BIN: ${{ runner.temp }}/omp/omp-linux-x64
           NPM_CONFIG_USERCONFIG: /dev/null
-        run: npm run verify:host
+        run: npm run verify:behavioral-host
 
   pi:
     name: Pi 0.84.2 packed install
@@ -63,4 +63,4 @@ jobs:
           PI_MATRIX_HOST: pi
           PI_MATRIX_BIN: ${{ runner.temp }}/pi/node_modules/.bin/pi
           NPM_CONFIG_USERCONFIG: /dev/null
-        run: npm run verify:host
+        run: npm run verify:behavioral-host
