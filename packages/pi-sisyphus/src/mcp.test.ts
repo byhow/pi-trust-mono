@@ -17,13 +17,24 @@ const descriptor = {
   },
 };
 
-const evidence = (advisoryEffect: "allow" | "deny" | "ask") =>
-  JSON.stringify({
+const evidence = (advisoryEffect: "allow" | "deny" | "ask") => {
+  const server = {
+    name: "docs",
+    transport: "http",
+    endpoint: "http:https://mcp.example.test",
+    argumentShape: [],
+    provenance: {},
+    rootClassifications: [],
+    capabilities: descriptor.capabilities,
+  };
+  const credentialKeys = ["Authorization"];
+  return JSON.stringify({
     version: 1,
     subject: "mcp-connect",
     advisoryEffect,
-    server: { name: "docs", transport: "http" },
-    credentialKeys: ["Authorization"],
+    descriptorIdentity: JSON.stringify({ ...server, credentialKeys }),
+    server,
+    credentialKeys,
     findings:
       advisoryEffect === "allow"
         ? []
@@ -35,6 +46,25 @@ const evidence = (advisoryEffect: "allow" | "deny" | "ask") =>
             },
           ],
   });
+};
+
+type MutableEvidenceFixture = {
+  descriptorIdentity: string;
+  server: {
+    argumentShape: unknown;
+    capabilities: unknown;
+    provenance: unknown;
+    rootClassifications: unknown;
+  };
+};
+
+const corruptEvidence = (
+  change: (value: MutableEvidenceFixture) => void,
+): string => {
+  const value = JSON.parse(evidence("allow")) as MutableEvidenceFixture;
+  change(value);
+  return JSON.stringify(value);
+};
 
 describe("vetMcp", () => {
   test.each([
@@ -92,6 +122,36 @@ describe("vetMcp", () => {
     for (const [stdout, code] of [
       ["not-json", 0],
       [evidence("deny"), 0],
+      [
+        corruptEvidence((value) => {
+          value.descriptorIdentity = "{}";
+        }),
+        0,
+      ],
+      [
+        corruptEvidence((value) => {
+          value.server.provenance = { sha256: "short" };
+        }),
+        0,
+      ],
+      [
+        corruptEvidence((value) => {
+          value.server.capabilities = { network: "world" };
+        }),
+        0,
+      ],
+      [
+        corruptEvidence((value) => {
+          value.server.rootClassifications = ["world"];
+        }),
+        0,
+      ],
+      [
+        corruptEvidence((value) => {
+          value.server.argumentShape = [42];
+        }),
+        0,
+      ],
       [
         JSON.stringify({
           version: 1,

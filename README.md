@@ -21,4 +21,7 @@ npm run verify:contracts           # public package invariants
 npm run verify:registration        # manifest ↔ extension registration
 npm run verify:pack                # npm payload allowlists
 PI_MATRIX_HOST=pi PI_MATRIX_BIN=/absolute/pi npm run verify:behavioral-host
+PI_PRODUCT_SISYPHUS_BIN=/absolute/sy \
+PI_PRODUCT_MODEL_PICKER_BIN=/absolute/model-picker \
+  npm run verify:product-integration # real product processes through adapters
 ```

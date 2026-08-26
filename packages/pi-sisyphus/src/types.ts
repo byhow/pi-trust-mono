@@ -34,6 +34,19 @@ export type TrustEvaluation =
         | "engine-invalid";
     };
 
+export type McpCapabilities = {
+  readonly readOnly?: boolean;
+  readonly filesystem?: "none" | "workspace" | "host";
+  readonly network?: "none" | "loopback" | "internet";
+  readonly secrets?: boolean;
+};
+
+export type McpProvenance = {
+  readonly package?: string;
+  readonly version?: string;
+  readonly sha256?: string;
+};
+
 export type McpServerDescriptor = {
   readonly name: string;
   readonly transport: "stdio" | "http";
@@ -43,26 +56,23 @@ export type McpServerDescriptor = {
   readonly env?: Readonly<Record<string, string>>;
   readonly headers?: Readonly<Record<string, string>>;
   readonly roots?: readonly string[];
-  readonly capabilities?: {
-    readonly readOnly?: boolean;
-    readonly filesystem?: "none" | "workspace" | "host";
-    readonly network?: "none" | "loopback" | "internet";
-    readonly secrets?: boolean;
-  };
-  readonly provenance?: {
-    readonly package?: string;
-    readonly version?: string;
-    readonly sha256?: string;
-  };
+  readonly capabilities?: McpCapabilities;
+  readonly provenance?: McpProvenance;
 };
 
 export type McpVetEvidence = {
   readonly version: 1;
   readonly subject: "mcp-connect";
   readonly advisoryEffect: "allow" | "deny" | "ask";
+  readonly descriptorIdentity: string;
   readonly server: {
     readonly name: string;
     readonly transport: "stdio" | "http";
+    readonly endpoint: string;
+    readonly argumentShape: readonly string[];
+    readonly provenance: McpProvenance;
+    readonly rootClassifications: readonly ("workspace" | "host")[];
+    readonly capabilities: McpCapabilities;
   };
   readonly credentialKeys: readonly string[];
   readonly findings: readonly {

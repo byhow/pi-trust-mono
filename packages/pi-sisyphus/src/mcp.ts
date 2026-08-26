@@ -24,6 +24,88 @@ const boundedText = (value: unknown, maxLength: number): string | undefined =>
     ? value
     : undefined;
 
+const boundedStringArray = (
+  value: unknown,
+  maxItems: number,
+  maxLength: number,
+): readonly string[] | undefined => {
+  if (!Array.isArray(value) || value.length > maxItems) return undefined;
+  const strings = value.map((item) => boundedText(item, maxLength));
+  return strings.some((item) => item === undefined)
+    ? undefined
+    : (strings as string[]);
+};
+
+const parseProvenance = (
+  value: unknown,
+): McpVetEvidence["server"]["provenance"] | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  if (
+    Object.keys(raw).some(
+      (key) => key !== "package" && key !== "version" && key !== "sha256",
+    )
+  ) {
+    return undefined;
+  }
+  const packageName =
+    raw.package === undefined ? undefined : boundedText(raw.package, 128);
+  const version =
+    raw.version === undefined ? undefined : boundedText(raw.version, 64);
+  const sha256 =
+    raw.sha256 === undefined ? undefined : boundedText(raw.sha256, 64);
+  if (
+    (raw.package !== undefined && !packageName) ||
+    (raw.version !== undefined && !version) ||
+    (raw.sha256 !== undefined && (!sha256 || !/^[a-f0-9]{64}$/u.test(sha256)))
+  ) {
+    return undefined;
+  }
+  return {
+    ...(packageName ? { package: packageName } : {}),
+    ...(version ? { version } : {}),
+    ...(sha256 ? { sha256 } : {}),
+  };
+};
+
+const parseCapabilities = (
+  value: unknown,
+): McpVetEvidence["server"]["capabilities"] | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  if (
+    Object.keys(raw).some(
+      (key) =>
+        key !== "readOnly" &&
+        key !== "filesystem" &&
+        key !== "network" &&
+        key !== "secrets",
+    ) ||
+    (raw.readOnly !== undefined && typeof raw.readOnly !== "boolean") ||
+    (raw.filesystem !== undefined &&
+      raw.filesystem !== "none" &&
+      raw.filesystem !== "workspace" &&
+      raw.filesystem !== "host") ||
+    (raw.network !== undefined &&
+      raw.network !== "none" &&
+      raw.network !== "loopback" &&
+      raw.network !== "internet") ||
+    (raw.secrets !== undefined && typeof raw.secrets !== "boolean")
+  ) {
+    return undefined;
+  }
+  return {
+    ...(raw.readOnly !== undefined ? { readOnly: raw.readOnly } : {}),
+    ...(raw.filesystem !== undefined ? { filesystem: raw.filesystem } : {}),
+    ...(raw.network !== undefined ? { network: raw.network } : {}),
+    ...(raw.secrets !== undefined ? { secrets: raw.secrets } : {}),
+  };
+};
+
 const parseEvidence = (raw: string): McpVetEvidence | undefined => {
   if (Buffer.byteLength(raw) > MAX_BYTES) return undefined;
   try {
@@ -36,25 +118,71 @@ const parseEvidence = (raw: string): McpVetEvidence | undefined => {
         value.advisoryEffect !== "ask") ||
       typeof value.server !== "object" ||
       value.server === null ||
-      !Array.isArray(value.credentialKeys) ||
-      value.credentialKeys.length > 128 ||
       !Array.isArray(value.findings) ||
       value.findings.length > 64
     ) {
       return undefined;
     }
+
+    const descriptorIdentity = boundedText(value.descriptorIdentity, 8_192);
     const name = boundedText(value.server.name, 128);
     const transport = value.server.transport;
-    const credentialKeys = value.credentialKeys.map((key) =>
-      boundedText(key, 128),
+    const endpoint = boundedText(value.server.endpoint, 2_048);
+    const argumentShape = boundedStringArray(
+      value.server.argumentShape,
+      64,
+      2_048,
     );
+    const provenance = parseProvenance(value.server.provenance);
+    const rootClassifications = boundedStringArray(
+      value.server.rootClassifications,
+      64,
+      16,
+    );
+    const capabilities = parseCapabilities(value.server.capabilities);
+    const credentialKeys = boundedStringArray(value.credentialKeys, 128, 128);
     if (
+      !descriptorIdentity ||
       !name ||
       (transport !== "stdio" && transport !== "http") ||
-      credentialKeys.some((key) => key === undefined)
+      !endpoint ||
+      !argumentShape ||
+      !provenance ||
+      !rootClassifications ||
+      rootClassifications.some(
+        (classification) =>
+          classification !== "workspace" && classification !== "host",
+      ) ||
+      !capabilities ||
+      !credentialKeys
     ) {
       return undefined;
     }
+
+    const server: McpVetEvidence["server"] = {
+      name,
+      transport,
+      endpoint,
+      argumentShape,
+      provenance,
+      rootClassifications: rootClassifications as readonly (
+        | "workspace"
+        | "host"
+      )[],
+      capabilities,
+    };
+    const expectedIdentity = JSON.stringify({
+      name: server.name,
+      transport: server.transport,
+      endpoint: server.endpoint,
+      argumentShape: server.argumentShape,
+      provenance: server.provenance,
+      rootClassifications: server.rootClassifications,
+      capabilities: server.capabilities,
+      credentialKeys,
+    });
+    if (descriptorIdentity !== expectedIdentity) return undefined;
+
     const findings = value.findings.map((finding) => {
       if (typeof finding !== "object" || finding === null) return undefined;
       const code = boundedText(finding.code, 128);
@@ -71,8 +199,9 @@ const parseEvidence = (raw: string): McpVetEvidence | undefined => {
       version: 1,
       subject: "mcp-connect",
       advisoryEffect: value.advisoryEffect,
-      server: { name, transport },
-      credentialKeys: credentialKeys as string[],
+      descriptorIdentity,
+      server,
+      credentialKeys,
       findings: findings as McpVetEvidence["findings"],
     };
   } catch {

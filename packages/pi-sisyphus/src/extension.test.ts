@@ -19,13 +19,26 @@ const decision = (
   },
 });
 
+const evidenceServer = {
+  name: "docs",
+  transport: "http" as const,
+  endpoint: "http:https://mcp.example.test",
+  argumentShape: [],
+  provenance: {},
+  rootClassifications: [],
+  capabilities: {},
+};
 const evidence: McpVetResult = {
   ok: true,
   evidence: {
     version: 1,
     subject: "mcp-connect",
     advisoryEffect: "ask",
-    server: { name: "docs", transport: "http" },
+    descriptorIdentity: JSON.stringify({
+      ...evidenceServer,
+      credentialKeys: [],
+    }),
+    server: evidenceServer,
     credentialKeys: [],
     findings: [],
   },
