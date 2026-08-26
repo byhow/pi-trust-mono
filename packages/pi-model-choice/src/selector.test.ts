@@ -7,8 +7,8 @@ import {
 } from "./selector.ts";
 
 describe("resolveModelPickerBinary", () => {
-  test("uses PATH by default and accepts only an exact absolute launcher override", () => {
-    expect(resolveModelPickerBinary(undefined)).toBe("model-picker");
+  test("requires an exact absolute launcher", () => {
+    expect(resolveModelPickerBinary(undefined)).toBeUndefined();
     expect(resolveModelPickerBinary("/opt/model-picker/bin/model-picker")).toBe(
       "/opt/model-picker/bin/model-picker",
     );

@@ -6,7 +6,7 @@ A fail-closed Pi/OMP adapter for the vendor-neutral [sisyphus](https://github.co
 
 ```sh
 export PI_TRUST_BUNDLE_DIR=/absolute/path/to/reviewed/bundles
-# Optional exact launcher override; otherwise `sy` is resolved from PATH.
+# The enforcement launcher is mandatory and must be an absolute path ending in `sy`.
 export PI_TRUST_ENGINE_BIN=/absolute/path/to/sy
 ```
 
@@ -18,7 +18,7 @@ Installing the package activates a `tool_call` hook. Missing bundles, an unavail
 
 The `agent_permit` tool evaluates a hypothetical call without executing it. `/permit <tool-name>` evaluates empty input. The package's own diagnostic tool bypasses its hook solely to avoid recursion.
 
-The adapter sends exact tool input to the local policy process over stdin. It passes a sanitized environment and forces `TRUST_ENGINE_LOG_PATH=/dev/null`, so sisyphus cannot persist raw tool arguments through its CLI decision logger. Decisions are bounded and schema-checked before use.
+The adapter sends exact tool input to the local policy process over stdin. It passes a sanitized environment with a fixed system `PATH` and forces `TRUST_ENGINE_LOG_PATH=/dev/null`, so sisyphus cannot persist raw tool arguments through its CLI decision logger. The configured launcher must therefore be self-contained or use an absolute interpreter. Decisions are bounded and schema-checked before use.
 
 ## Scope
 

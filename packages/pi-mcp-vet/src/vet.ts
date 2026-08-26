@@ -23,7 +23,7 @@ const SHELLS = new Set([
   "sh",
   "zsh",
 ]);
-const PACKAGE_RUNNERS = new Set(["bunx", "npx", "pnpm", "yarn"]);
+const PACKAGE_RUNNERS = new Set(["bunx", "npm", "npx", "pnpm", "yarn"]);
 const EXACT_PACKAGE =
   /^(?:@[a-z0-9._-]+\/[a-z0-9._-]+|[a-z0-9._-]+)@\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/iu;
 
@@ -265,6 +265,24 @@ const vetHttp = (
   );
 };
 
+const hasExactRunnerTarget = (
+  commandName: string,
+  args: readonly string[],
+): boolean => {
+  let index = 0;
+  if (commandName === "pnpm" || commandName === "yarn") {
+    if (args[0] !== "dlx") return false;
+    index = 1;
+  } else if (commandName === "npm") {
+    return false;
+  }
+
+  const safeFlags = new Set(["--bun", "--quiet", "--yes", "-y"]);
+  while (index < args.length && safeFlags.has(args[index] ?? "")) index++;
+  const target = args[index];
+  return target !== undefined && EXACT_PACKAGE.test(target);
+};
+
 const vetStdio = (
   descriptor: McpServerDescriptor,
   findings: McpVetFinding[],
@@ -292,13 +310,12 @@ const vetStdio = (
     );
   }
   if (PACKAGE_RUNNERS.has(commandName)) {
-    const pinned = args.some((arg) => EXACT_PACKAGE.test(arg));
-    if (!pinned) {
+    if (!hasExactRunnerTarget(commandName, args)) {
       addFinding(
         findings,
         "provenance.package-unpinned",
         "high",
-        "Package-runner MCP commands must name an exact semantic version.",
+        "Package runners must use an allowlisted execution grammar with the selected package pinned to an exact semantic version.",
       );
     }
   } else if (!isAbsolute(command)) {
@@ -349,9 +366,11 @@ export const vetMcpServer = (input: unknown): McpVetDecision => {
 
   for (const root of descriptor.roots ?? []) {
     if (
-      root === "/" ||
-      root === "~" ||
+      isAbsolute(root) ||
+      /^[a-z]:[\\/]/iu.test(root) ||
+      root.startsWith("~") ||
       root.startsWith("$HOME") ||
+      root.startsWith("$" + "{HOME}") ||
       root.split(/[\\/]/u).includes("..")
     ) {
       addFinding(

@@ -44,7 +44,7 @@ export default function modelChoiceExtension(api: HostExtensionAPI): void {
     description:
       "Request a versioned recommendation from the external model-picker CLI. Does not change the active model.",
     parameters: requestSchema,
-    approval: "read",
+    approval: "exec",
     loadMode: "discoverable",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = await runModelChoice(api, params, ctx.cwd);

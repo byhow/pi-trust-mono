@@ -10,7 +10,7 @@ Install a `model-picker` release that supports:
 model-picker pick --task agent --limit 5 --contract
 ```
 
-By default the adapter resolves `model-picker` from `PATH`. To pin an exact launcher, set `PI_MODEL_PICKER_BIN` to an absolute path ending in `model-picker` or `mp`.
+Set `PI_MODEL_PICKER_BIN` to a reviewed absolute launcher path ending in `model-picker` or `mp`. The adapter does not search `PATH`; missing or relative selectors fail closed.
 
 ## Commands
 
@@ -20,7 +20,7 @@ By default the adapter resolves `model-picker` from `PATH`. To pin an exact laun
 /model-choice review
 ```
 
-The `model_choice` tool also accepts optional filters, limits, and speed/price/context weights. Every request is passed as argv without shell evaluation. Output is accepted only when it matches the bounded version-1 envelope.
+The `model_choice` tool also accepts optional filters, limits, and speed/price/context weights. Because it starts the selected local process, the host classifies it as `exec`, not `read`. Every request is passed as argv without shell evaluation. Output is accepted only when it matches the bounded version-1 envelope.
 
 ## Scope
 

@@ -12,7 +12,7 @@ export const spawnPolicyEngine: PolicyEngineExecutor = (config, input) => {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       HOME: tmpdir(),
-      PATH: process.env.PATH ?? "",
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
       TMPDIR: tmpdir(),
       TRUST_ENGINE_BUNDLE_DIR: config.bundleDir,
       TRUST_ENGINE_LOG_PATH: "/dev/null",

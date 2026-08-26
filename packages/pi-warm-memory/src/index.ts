@@ -192,9 +192,7 @@ const recall = async (
       ctx.cwd,
       process.env[HISTORY_DIR_ENV],
     );
-    api.sendUserMessage(
-      await runRecall(splitCommandArguments(args), location.path),
-    );
+    api.sendUserMessage(await runRecall(splitCommandArguments(args), location));
   } catch {
     ctx.ui.notify(
       "The configured warm-memory archive path is unsafe.",

@@ -1,4 +1,5 @@
 import { buildPacketDocs, readPacketBodies } from "../packets.ts";
+import type { HistoryLocation } from "../paths.ts";
 import { frameUntrustedData } from "../prompt-frame.ts";
 import {
   loadOrRebuild,
@@ -65,14 +66,14 @@ export const formatHits = (hits: readonly SearchHit[]): string =>
  */
 export const runRecall = async (
   args: readonly string[],
-  historyDir: string,
+  location: HistoryLocation,
 ): Promise<string> => {
   const { query, filters } = parseArgs(args);
   if (!query) return HELP;
   if (query.length > 500) return `Query validation failed.\n\n${HELP}`;
 
   try {
-    const packetDocs = await buildPacketDocs(historyDir);
+    const packetDocs = await buildPacketDocs(location);
     if (packetDocs.status === "missing") {
       return "No archive index exists yet — nothing to recall. Use /archive-session to create one.";
     }
@@ -111,7 +112,7 @@ export const runRecall = async (
     }
 
     const bodies = await readPacketBodies(
-      historyDir,
+      location,
       hits.slice(0, 3).map((hit) => hit.filePath),
     );
     if (bodies.length === 0) {

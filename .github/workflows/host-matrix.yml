@@ -1,0 +1,67 @@
+name: Host matrix
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: host-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  omp:
+    name: OMP ${{ matrix.version }} packed install
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [17.4.1, 18.0.3]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Download exact OMP release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/omp"
+          gh release download "v${{ matrix.version }}" --repo can1357/oh-my-pi --pattern omp-linux-x64 --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/omp"
+          chmod 0755 "$RUNNER_TEMP/omp/omp-linux-x64"
+          (cd "$RUNNER_TEMP/omp" && sha256sum --check --ignore-missing SHA256SUMS.txt)
+      - name: Verify packed packages in OMP
+        env:
+          PI_MATRIX_HOST: omp
+          PI_MATRIX_BIN: ${{ runner.temp }}/omp/omp-linux-x64
+          NPM_CONFIG_USERCONFIG: /dev/null
+        run: npm run verify:host
+
+  pi:
+    name: Pi 0.84.2 packed install
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install exact upstream Pi
+        env:
+          NPM_CONFIG_USERCONFIG: /dev/null
+        run: npm install --prefix "$RUNNER_TEMP/pi" --ignore-scripts --registry=https://registry.npmjs.org @earendil-works/pi-coding-agent@0.84.2
+      - name: Verify packed packages in Pi
+        env:
+          PI_MATRIX_HOST: pi
+          PI_MATRIX_BIN: ${{ runner.temp }}/pi/node_modules/.bin/pi
+          NPM_CONFIG_USERCONFIG: /dev/null
+        run: npm run verify:host

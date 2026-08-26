@@ -20,7 +20,7 @@ const TASKS = new Set([
 export const resolveModelPickerBinary = (
   configured: string | undefined,
 ): string | undefined => {
-  if (!configured) return "model-picker";
+  if (!configured) return undefined;
   for (const character of configured) {
     const code = character.codePointAt(0);
     if (code !== undefined && (code <= 0x1f || code === 0x7f)) return undefined;

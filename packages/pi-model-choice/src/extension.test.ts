@@ -1,6 +1,15 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { selection } from "../test/selection-fixture.ts";
 import modelChoiceExtension from "./extension.ts";
+
+const originalBinary = process.env.PI_MODEL_PICKER_BIN;
+beforeEach(() => {
+  process.env.PI_MODEL_PICKER_BIN = "/opt/bin/model-picker";
+});
+afterEach(() => {
+  if (originalBinary === undefined) delete process.env.PI_MODEL_PICKER_BIN;
+  else process.env.PI_MODEL_PICKER_BIN = originalBinary;
+});
 
 const context = {
   cwd: "/workspace",

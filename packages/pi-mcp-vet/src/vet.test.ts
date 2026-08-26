@@ -108,6 +108,38 @@ describe("vetMcpServer", () => {
     ).toMatchObject({ effect: "allow", score: 100 });
   });
 
+  test.each([
+    ["npx", ["untrusted@latest", "benign@1.2.3"]],
+    ["pnpm", ["run", "attacker", "benign@1.2.3"]],
+    ["yarn", ["run", "attacker", "benign@1.2.3"]],
+    ["npm", ["exec", "benign@1.2.3"]],
+  ])(
+    "binds package pins to the actual %s execution target",
+    (command, args) => {
+      const decision = vetMcpServer({
+        name: "runner",
+        transport: "stdio",
+        command,
+        args,
+      });
+      expect(decision.effect).toBe("deny");
+      expect(decision.findings.map((finding) => finding.code)).toContain(
+        "provenance.package-unpinned",
+      );
+    },
+  );
+
+  test("allows only the pinned pnpm dlx grammar", () => {
+    expect(
+      vetMcpServer({
+        name: "package",
+        transport: "stdio",
+        command: "pnpm",
+        args: ["dlx", "--quiet", "@example/mcp@1.2.3"],
+      }),
+    ).toMatchObject({ effect: "allow", score: 100 });
+  });
+
   test("asks for mutable PATH, credential, and mutating capabilities", () => {
     const decision = vetMcpServer({
       name: "local",
@@ -143,6 +175,20 @@ describe("vetMcpServer", () => {
       "filesystem.root-overbroad",
       "capability.toxic-combination",
     ]);
+  });
+
+  test.each([
+    "/etc",
+    "/Users/alice/.ssh",
+    "~/.ssh",
+    "$" + "{HOME}/.ssh",
+    "C:\\Users\\alice",
+  ])("denies non-workspace root %s", (root) => {
+    const decision = vetMcpServer({ ...httpsServer, roots: [root] });
+    expect(decision.effect).toBe("deny");
+    expect(decision.findings).toContainEqual(
+      expect.objectContaining({ code: "filesystem.root-overbroad" }),
+    );
   });
 
   test("requires provenance for absolute binaries", () => {

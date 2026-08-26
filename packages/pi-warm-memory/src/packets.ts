@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
-import { type FileHandle, open, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { type FileHandle, lstat, open, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { HistoryLocation } from "./paths.ts";
 import type { CorpusDocument } from "./search/corpus.ts";
 import { hasControlCharacter } from "./text-safety.ts";
 
@@ -203,8 +204,54 @@ const parsePacketRef = (value: unknown): PacketRef | null | undefined => {
   return { packetKind, path, timestamp, topic, summary, tags, files };
 };
 
+const resolveHistoryRoot = async (
+  location: HistoryLocation,
+): Promise<
+  | { readonly status: "ready"; readonly root: string }
+  | { readonly status: "missing" | "unreadable" }
+> => {
+  if (!location.projectScoped) {
+    try {
+      const metadata = await lstat(location.path);
+      if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+        return { status: "unreadable" };
+      }
+      return { status: "ready", root: await realpath(location.path) };
+    } catch (error) {
+      return {
+        status: errorCode(error) === "ENOENT" ? "missing" : "unreadable",
+      };
+    }
+  }
+
+  try {
+    const canonicalProject = await realpath(location.projectRoot);
+    const pathFromProject = relative(location.projectRoot, location.path);
+    if (
+      pathFromProject === "" ||
+      pathFromProject.startsWith("..") ||
+      isAbsolute(pathFromProject)
+    ) {
+      return { status: "unreadable" };
+    }
+    let current = canonicalProject;
+    for (const segment of pathFromProject.split(sep)) {
+      current = join(current, segment);
+      const metadata = await lstat(current);
+      if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+        return { status: "unreadable" };
+      }
+    }
+    return { status: "ready", root: current };
+  } catch (error) {
+    return {
+      status: errorCode(error) === "ENOENT" ? "missing" : "unreadable",
+    };
+  }
+};
+
 const readIndex = async (
-  historyDir: string,
+  location: HistoryLocation,
 ): Promise<
   | { readonly status: Exclude<PacketIndexStatus, "ready"> }
   | {
@@ -213,12 +260,9 @@ const readIndex = async (
       readonly refs: readonly PacketRef[];
     }
 > => {
-  let historyRoot: string;
-  try {
-    historyRoot = await realpath(historyDir);
-  } catch (error) {
-    return { status: errorCode(error) === "ENOENT" ? "missing" : "unreadable" };
-  }
+  const root = await resolveHistoryRoot(location);
+  if (root.status !== "ready") return { status: root.status };
+  const historyRoot = root.root;
 
   let raw: string;
   try {
@@ -274,9 +318,9 @@ const readIndex = async (
 
 /** Map validated index-v1 records to bounded search documents. */
 export const buildPacketDocs = async (
-  historyDir: string,
+  location: HistoryLocation,
 ): Promise<PacketDocsResult> => {
-  const index = await readIndex(historyDir);
+  const index = await readIndex(location);
   if (index.status !== "ready") return { status: index.status, docs: [] };
 
   const docs: CorpusDocument[] = [];
@@ -304,15 +348,12 @@ export const buildPacketDocs = async (
 
 /** Read only already-ranked packet bodies through the same confinement checks. */
 export const readPacketBodies = async (
-  historyDir: string,
+  location: HistoryLocation,
   locators: readonly string[],
 ): Promise<readonly PacketBody[]> => {
-  let historyRoot: string;
-  try {
-    historyRoot = await realpath(historyDir);
-  } catch {
-    return [];
-  }
+  const root = await resolveHistoryRoot(location);
+  if (root.status !== "ready") return [];
+  const historyRoot = root.root;
 
   const bodies: PacketBody[] = [];
   for (const locator of locators.slice(0, 3)) {

@@ -38,12 +38,12 @@ const hasControlCharacter = (value: string): boolean => {
 export const resolvePolicyEngineConfig = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): PolicyEngineConfig | undefined => {
-  const configuredBinary = environment.PI_TRUST_ENGINE_BIN;
-  const binary = configuredBinary || "sy";
+  const binary = environment.PI_TRUST_ENGINE_BIN;
   if (
+    !binary ||
     hasControlCharacter(binary) ||
-    (configuredBinary !== undefined &&
-      (!isAbsolute(binary) || basename(binary) !== "sy"))
+    !isAbsolute(binary) ||
+    basename(binary) !== "sy"
   ) {
     return undefined;
   }
@@ -138,14 +138,16 @@ export const evaluatePolicy = async (
 
   try {
     const result = await execute(config, JSON.stringify(input));
-    const decision = parsePolicyDecision(result.stdout);
-    if (!decision) {
-      return {
-        ok: false,
-        code: result.code === -1 ? "engine-unavailable" : "engine-invalid",
-      };
+    if (result.killed || result.code === -1) {
+      return { ok: false, code: "engine-unavailable" };
     }
-    // A deny intentionally exits non-zero in sisyphus; a valid decision is authoritative.
+    const decision = parsePolicyDecision(result.stdout);
+    if (!decision) return { ok: false, code: "engine-invalid" };
+    const validExit =
+      decision.effect === "deny"
+        ? result.code === 0 || result.code === 1
+        : result.code === 0;
+    if (!validExit) return { ok: false, code: "engine-invalid" };
     return { ok: true, decision };
   } catch {
     return { ok: false, code: "engine-unavailable" };

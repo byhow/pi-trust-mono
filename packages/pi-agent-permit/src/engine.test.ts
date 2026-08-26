@@ -21,12 +21,13 @@ const decision = {
 const environment = {
   PATH: "/usr/bin:/bin",
   PI_TRUST_BUNDLE_DIR: "/opt/policy/bundles",
+  PI_TRUST_ENGINE_BIN: "/opt/sisyphus/bin/sy",
 };
 
 describe("resolvePolicyEngineConfig", () => {
-  test("uses sy from PATH and accepts an exact absolute override", () => {
+  test("requires an exact absolute engine and bundle path", () => {
     expect(resolvePolicyEngineConfig(environment)).toEqual({
-      binary: "sy",
+      binary: "/opt/sisyphus/bin/sy",
       bundleDir: "/opt/policy/bundles",
     });
     expect(
@@ -42,7 +43,11 @@ describe("resolvePolicyEngineConfig", () => {
 
   test.each([
     {},
-    { PI_TRUST_BUNDLE_DIR: "relative/bundles" },
+    { PI_TRUST_BUNDLE_DIR: "/opt/bundles" },
+    {
+      PI_TRUST_BUNDLE_DIR: "relative/bundles",
+      PI_TRUST_ENGINE_BIN: "/opt/bin/sy",
+    },
     {
       PI_TRUST_BUNDLE_DIR: "/opt/bundles",
       PI_TRUST_ENGINE_BIN: "relative/sy",
@@ -68,7 +73,7 @@ describe("evaluatePolicy", () => {
       decision,
     });
     expect(execute).toHaveBeenCalledWith(
-      { binary: "sy", bundleDir: "/opt/policy/bundles" },
+      { binary: "/opt/sisyphus/bin/sy", bundleDir: "/opt/policy/bundles" },
       JSON.stringify(input),
     );
   });
@@ -82,6 +87,23 @@ describe("evaluatePolicy", () => {
         stdout: JSON.stringify(denied),
       })),
     ).toEqual({ ok: true, decision: denied });
+  });
+
+  test("rejects killed and non-zero authorizing decisions", async () => {
+    expect(
+      await evaluatePolicy(input, environment, async () => ({
+        code: 0,
+        killed: true,
+        stdout: JSON.stringify(decision),
+      })),
+    ).toEqual({ ok: false, code: "engine-unavailable" });
+    expect(
+      await evaluatePolicy(input, environment, async () => ({
+        code: 1,
+        killed: false,
+        stdout: JSON.stringify(decision),
+      })),
+    ).toEqual({ ok: false, code: "engine-invalid" });
   });
 
   test.each([
