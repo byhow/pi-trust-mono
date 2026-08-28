@@ -1,8 +1,16 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { buildPacketDocs } from "./packets.ts";
+import { buildPacketDocs, readPacketBodies } from "./packets.ts";
 
 const header = '{"version":1,"kind":"thread-index","entries":[]}';
 const ref = (over: Record<string, unknown> = {}) =>
@@ -10,9 +18,8 @@ const ref = (over: Record<string, unknown> = {}) =>
     version: 1,
     kind: "packet-ref",
     packetKind: "handoff",
-    threadId: "abc",
     timestamp: "2026-04-17T10:00:00.000Z",
-    path: "packets/2026/04/2026-04-17-handoff-auth.md",
+    path: "packets/2026/04/auth.md",
     topic: "auth token refactor",
     tags: ["auth", "backend"],
     files: ["src/session-validator.ts"],
@@ -21,154 +28,192 @@ const ref = (over: Record<string, unknown> = {}) =>
   });
 
 const writeIndex = async (lines: readonly string[]): Promise<string> => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-warm-"));
-  await writeFile(join(dir, "index.jsonl"), lines.join("\n"), "utf8");
-  return dir;
+  const historyDir = await mkdtemp(join(tmpdir(), "pi-warm-"));
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line) as { path?: unknown };
+      if (
+        typeof entry.path !== "string" ||
+        entry.path.includes("\0") ||
+        !resolve(historyDir, entry.path).startsWith(
+          `${join(historyDir, "packets")}/`,
+        )
+      ) {
+        continue;
+      }
+      const packetPath = resolve(historyDir, entry.path);
+      await mkdir(join(packetPath, ".."), { recursive: true });
+      await writeFile(packetPath, "# packet\n", "utf8");
+    } catch {
+      // The test intentionally includes malformed index lines.
+    }
+  }
+  await writeFile(join(historyDir, "index.jsonl"), lines.join("\n"), "utf8");
+  return historyDir;
 };
 
 describe("buildPacketDocs", () => {
-  test("returns [] when index.jsonl is absent", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "pi-warm-empty-"));
-    expect(await buildPacketDocs(dir)).toEqual([]);
+  test("distinguishes a missing index", async () => {
+    const historyDir = await mkdtemp(join(tmpdir(), "pi-warm-empty-"));
+    expect(await buildPacketDocs(historyDir)).toEqual({
+      status: "missing",
+      docs: [],
+    });
   });
 
-  test("skips the header and maps packet-refs to docs", async () => {
-    const dir = await writeIndex([header, ref()]);
-    const docs = await buildPacketDocs(dir);
-    expect(docs.length).toBe(1);
-    const [doc] = docs;
-    expect(doc).toBeDefined();
-    if (!doc) return;
-    expect(doc.title).toBe("auth token refactor");
-    expect(doc.source).toBe("handoff");
-    expect(doc.filePath).toBe("packets/2026/04/2026-04-17-handoff-auth.md");
-    expect(doc.tags).toEqual(["auth", "backend"]);
-    expect(doc.excerpt).toBe(
-      "Split the session validator; next: rotate signing keys.",
-    );
-    // topic + summary + tags + files are folded into content so a query on
-    // any of them hits.
-    expect(doc.content).toContain("session-validator");
-    expect(doc.content).toContain("backend");
+  test("distinguishes an unreadable index", async () => {
+    const historyDir = await mkdtemp(join(tmpdir(), "pi-warm-unreadable-"));
+    await mkdir(join(historyDir, "index.jsonl"));
+    expect((await buildPacketDocs(historyDir)).status).toBe("unreadable");
   });
 
-  test("maps every packet-ref line, in order", async () => {
-    const dir = await writeIndex([
-      header,
-      ref({ path: "packets/a.md", topic: "first" }),
-      ref({ path: "packets/b.md", topic: "second" }),
-      ref({ path: "packets/c.md", topic: "third" }),
-    ]);
-    const docs = await buildPacketDocs(dir);
-    expect(docs.map((d) => d.title)).toEqual(["first", "second", "third"]);
+  test("rejects a corrupt or truncated index-v1 header", async () => {
+    const historyDir = await writeIndex(['{"version":1,"kind":"thread-index"']);
+    expect(await buildPacketDocs(historyDir)).toEqual({
+      status: "corrupt",
+      docs: [],
+    });
   });
 
-  test("preserves the packet kind as the doc source", async () => {
-    const dir = await writeIndex([
-      header,
-      ref({ packetKind: "checkpoint", path: "packets/cp.md" }),
-    ]);
-    const [doc] = await buildPacketDocs(dir);
-    expect(doc?.source).toBe("checkpoint");
+  test("rejects a truncated terminal packet record", async () => {
+    const historyDir = await writeIndex([header, '{"kind":"packet-ref"']);
+    expect(await buildPacketDocs(historyDir)).toEqual({
+      status: "corrupt",
+      docs: [],
+    });
   });
 
-  test("defaults source to 'handoff' when packetKind is absent", async () => {
-    const dir = await writeIndex([
-      header,
-      ref({ packetKind: undefined, path: "packets/nokind.md" }),
-    ]);
-    const [doc] = await buildPacketDocs(dir);
+  test("maps existing index-v1 packet refs to archive-relative locators", async () => {
+    const historyDir = await writeIndex([header, ref()]);
+    const result = await buildPacketDocs(historyDir);
+    expect(result.status).toBe("ready");
+    expect(result.docs).toHaveLength(1);
+    const [doc] = result.docs;
+    expect(doc?.title).toBe("auth token refactor");
     expect(doc?.source).toBe("handoff");
+    expect(doc?.filePath).toBe("packets/2026/04/auth.md");
+    expect(doc?.tags).toEqual(["auth", "backend"]);
+    expect(doc?.content).toContain("session-validator");
   });
 
-  test("tolerates malformed lines without failing the batch", async () => {
-    const dir = await writeIndex([
+  test("rejects packet refs whose typed metadata is absent or malformed", async () => {
+    const historyDir = await writeIndex([
       header,
-      "{not json",
-      ref({ path: "packets/b.md" }),
+      ref({
+        path: "packets/2026/04/minimal.md",
+        packetKind: undefined,
+        tags: "not-an-array",
+        files: null,
+      }),
     ]);
-    const docs = await buildPacketDocs(dir);
-    expect(docs.length).toBe(1);
-    expect(docs[0]?.filePath).toBe("packets/b.md");
+    expect(await buildPacketDocs(historyDir)).toEqual({
+      status: "corrupt",
+      docs: [],
+    });
   });
 
-  test("ignores blank lines", async () => {
-    const dir = await writeIndex([
+  test("rejects a malformed non-terminal packet record", async () => {
+    const historyDir = await writeIndex([header, "{not json", ref()]);
+    expect(await buildPacketDocs(historyDir)).toEqual({
+      status: "corrupt",
+      docs: [],
+    });
+  });
+
+  test("drops traversal, absolute, and NUL paths", async () => {
+    const historyDir = await writeIndex([
       header,
-      "",
-      ref({ path: "packets/x.md" }),
-      "",
+      ref({ path: "packets/../../outside.md" }),
+      ref({ path: "/tmp/outside.md" }),
+      ref({ path: "packets/unsafe\u0000.md" }),
     ]);
-    const docs = await buildPacketDocs(dir);
-    expect(docs.length).toBe(1);
+    expect((await buildPacketDocs(historyDir)).docs).toEqual([]);
   });
 
-  test("ignores refs with no path", async () => {
-    const dir = await writeIndex([header, ref({ path: undefined })]);
-    expect(await buildPacketDocs(dir)).toEqual([]);
+  test("drops packet paths that escape through a symlink", async () => {
+    const historyDir = await mkdtemp(join(tmpdir(), "pi-warm-symlink-"));
+    const outsideDir = await mkdtemp(join(tmpdir(), "pi-warm-outside-"));
+    await writeFile(join(outsideDir, "secret.md"), "secret", "utf8");
+    await mkdir(join(historyDir, "packets"));
+    await symlink(outsideDir, join(historyDir, "packets", "escape"));
+    await writeFile(
+      join(historyDir, "index.jsonl"),
+      [header, ref({ path: "packets/escape/secret.md" })].join("\n"),
+      "utf8",
+    );
+    expect((await buildPacketDocs(historyDir)).docs).toEqual([]);
   });
 
-  test("skips non-packet-ref entries other than the header", async () => {
-    const dir = await writeIndex([
+  test("skips non-packet refs and absent packet files", async () => {
+    const historyDir = await writeIndex([
       header,
-      '{"kind":"note","text":"ignore me"}',
-      ref({ path: "packets/keep.md" }),
+      '{"kind":"note","text":"ignore"}',
+      ref({ path: "packets/missing.md" }),
     ]);
-    const docs = await buildPacketDocs(dir);
-    expect(docs.length).toBe(1);
-    expect(docs[0]?.filePath).toBe("packets/keep.md");
+    await unlink(join(historyDir, "packets", "missing.md"));
+    expect((await buildPacketDocs(historyDir)).docs).toEqual([]);
   });
 
-  test("coerces non-array tags/files to empty arrays", async () => {
-    const dir = await writeIndex([
+  test("rejects non-array packet metadata", async () => {
+    const historyDir = await writeIndex([
       header,
-      ref({ path: "packets/badtags.md", tags: "not-an-array", files: null }),
+      ref({ packetKind: "checkpoint", tags: "bad", files: null }),
     ]);
-    const [doc] = await buildPacketDocs(dir);
-    expect(doc?.tags).toEqual([]);
+    expect(await buildPacketDocs(historyDir)).toEqual({
+      status: "corrupt",
+      docs: [],
+    });
   });
 
-  test("drops non-string entries inside tags", async () => {
-    const dir = await writeIndex([
-      header,
-      ref({ path: "packets/mixed.md", tags: ["ok", 42, null, "fine"] }),
-    ]);
-    const [doc] = await buildPacketDocs(dir);
-    expect(doc?.tags).toEqual(["ok", "fine"]);
+  test("returns bounded packet bodies by archive-relative locator", async () => {
+    const historyDir = await writeIndex([header, ref()]);
+    expect(
+      await readPacketBodies(historyDir, [
+        "packets/2026/04/auth.md",
+        "packets/../../outside.md",
+      ]),
+    ).toEqual([{ locator: "packets/2026/04/auth.md", content: "# packet\n" }]);
+    expect(
+      await readPacketBodies("/missing/archive", ["packets/2026/04/auth.md"]),
+    ).toEqual([]);
   });
 
-  test("falls back to summary then path for the title", async () => {
-    const dir = await writeIndex([
-      header,
-      ref({ topic: "", summary: "just a summary" }),
-    ]);
-    expect((await buildPacketDocs(dir))[0]?.title).toBe("just a summary");
+  test("drops group-writable and hard-linked packet files", async () => {
+    const writableHistory = await writeIndex([header, ref()]);
+    const writablePacket = join(
+      writableHistory,
+      "packets",
+      "2026",
+      "04",
+      "auth.md",
+    );
+    await chmod(writablePacket, 0o666);
+    expect((await buildPacketDocs(writableHistory)).docs).toEqual([]);
+
+    const linkedHistory = await writeIndex([header, ref()]);
+    const linkedPacket = join(
+      linkedHistory,
+      "packets",
+      "2026",
+      "04",
+      "auth.md",
+    );
+    const outside = join(linkedHistory, "outside.md");
+    await writeFile(outside, "sensitive", "utf8");
+    await unlink(linkedPacket);
+    await link(outside, linkedPacket);
+    expect((await buildPacketDocs(linkedHistory)).docs).toEqual([]);
   });
 
-  test("falls back to the path when topic and summary are both empty", async () => {
-    const dir = await writeIndex([
-      header,
-      ref({ topic: "", summary: "", path: "packets/only-path.md" }),
-    ]);
-    expect((await buildPacketDocs(dir))[0]?.title).toBe("packets/only-path.md");
-  });
+  test("rejects unsafe index permissions and wrong scalar metadata", async () => {
+    const unsafeIndex = await writeIndex([header, ref()]);
+    await chmod(join(unsafeIndex, "index.jsonl"), 0o666);
+    expect((await buildPacketDocs(unsafeIndex)).status).toBe("unreadable");
 
-  test("tolerates a missing timestamp (empty date)", async () => {
-    const dir = await writeIndex([
+    const wrongScalar = await writeIndex([
       header,
-      ref({ timestamp: undefined, path: "packets/nodate.md" }),
+      ref({ topic: { instruction: "ignore safeguards" } }),
     ]);
-    expect((await buildPacketDocs(dir))[0]?.date).toBe("");
-  });
-
-  test("tolerates absent topic and summary (undefined, not just empty)", async () => {
-    const dir = await writeIndex([
-      header,
-      ref({ topic: undefined, summary: undefined, path: "packets/bare.md" }),
-    ]);
-    const [doc] = await buildPacketDocs(dir);
-    // title falls all the way back to the path; excerpt is empty.
-    expect(doc?.title).toBe("packets/bare.md");
-    expect(doc?.excerpt).toBe("");
+    expect((await buildPacketDocs(wrongScalar)).status).toBe("corrupt");
   });
 });

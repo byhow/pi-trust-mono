@@ -4,12 +4,20 @@
   "workspaces": [
     "packages/*"
   ],
+  "packageManager": "npm@11.16.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "lint": "biome check .",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit -p tsconfig.base.json",
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "verify:contracts": "node scripts/verify-package-contracts.mjs",
+    "verify:pack": "node scripts/verify-packed-packages.mjs",
+    "verify:host": "node scripts/verify-host-matrix.mjs",
+    "verify:lockfile": "node scripts/verify-public-lockfile.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "changeset publish"
@@ -17,7 +25,8 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@changesets/cli": "^2.31.0",
-    "@oh-my-pi/pi-coding-agent": "^16.3.12",
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@oh-my-pi/pi-coding-agent": "18.0.3",
     "@types/node": "^22.20.1",
     "typescript": "^5.9.0"
   }

@@ -1,77 +1,328 @@
-/**
- * Map the warm-memory `index.jsonl` into search documents.
- *
- * `index.jsonl` is the durable source of truth: line 1 is a `thread-index` header,
- * every other line is a `packet-ref` written by /archive-session. We index the
- * structured refs (topic/summary/tags/files) — not the packet bodies — so recall
- * is cheap: one file read, no packet I/O. The `filePath` we surface is the packet
- * path the agent then reads on demand.
- */
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { constants } from "node:fs";
+import { type FileHandle, open, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CorpusDocument } from "./search/corpus.ts";
 
-/** Shape of a `packet-ref` line, as written by archive-session.ts. */
+const MAX_INDEX_BYTES = 4 * 1024 * 1024;
+const MAX_INDEX_LINES = 4_097;
+const MAX_PACKET_BYTES = 32 * 1024;
+const PACKET_PATH = /^packets\/\d{4}\/\d{2}\/[a-z0-9._-]+\.md$/iu;
+
 type PacketRef = {
-  readonly kind?: string;
-  readonly packetKind?: string;
-  readonly timestamp?: string;
-  readonly path?: string;
-  readonly topic?: string;
-  readonly summary?: string;
-  readonly tags?: readonly string[];
-  readonly files?: readonly string[];
+  readonly packetKind: "handoff" | "checkpoint";
+  readonly timestamp: string;
+  readonly path: string;
+  readonly topic: string;
+  readonly summary: string;
+  readonly tags: readonly string[];
+  readonly files: readonly string[];
 };
 
-const asStringArray = (v: unknown): readonly string[] =>
-  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+export type PacketIndexStatus = "ready" | "missing" | "unreadable" | "corrupt";
 
-/**
- * Parse `<historyDir>/index.jsonl` into corpus documents. Returns [] if the index
- * does not exist yet (fresh project). Malformed lines and the header are skipped.
- */
-export const buildPacketDocs = async (
+export type PacketDocsResult = {
+  readonly status: PacketIndexStatus;
+  readonly docs: readonly CorpusDocument[];
+};
+
+export type PacketBody = {
+  readonly locator: string;
+  readonly content: string;
+};
+
+const errorCode = (error: unknown): string | undefined =>
+  typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : undefined;
+
+const isWithin = (parent: string, child: string): boolean => {
+  const pathFromParent = relative(parent, child);
+  return (
+    pathFromParent !== "" &&
+    !pathFromParent.startsWith("..") &&
+    !isAbsolute(pathFromParent)
+  );
+};
+
+const assertRegularPacket = async (handle: FileHandle): Promise<number> => {
+  const metadata = await handle.stat();
+  if (
+    !metadata.isFile() ||
+    metadata.nlink !== 1 ||
+    metadata.size > MAX_PACKET_BYTES ||
+    (metadata.mode & 0o022) !== 0
+  ) {
+    throw new Error("unsafe packet file");
+  }
+  return metadata.size;
+};
+
+const readExact = async (handle: FileHandle, size: number): Promise<string> => {
+  const buffer = Buffer.alloc(size + 1);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      offset,
+      buffer.length - offset,
+      offset,
+    );
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  if (offset !== size) throw new Error("packet changed while reading");
+  return buffer.subarray(0, size).toString("utf8");
+};
+
+const safePacketPath = async (
+  historyRoot: string,
+  packetPath: string,
+): Promise<string | undefined> => {
+  if (!PACKET_PATH.test(packetPath) || isAbsolute(packetPath)) return undefined;
+
+  const packetsRoot = resolve(historyRoot, "packets");
+  const candidate = resolve(historyRoot, packetPath);
+  if (!isWithin(packetsRoot, candidate)) return undefined;
+
+  try {
+    if ((await realpath(packetsRoot)) !== packetsRoot) return undefined;
+    const candidateParent = dirname(candidate);
+    if ((await realpath(candidateParent)) !== candidateParent) return undefined;
+    return candidate;
+  } catch {
+    return undefined;
+  }
+};
+
+const inspectPacket = async (
+  historyRoot: string,
+  packetPath: string,
+): Promise<boolean> => {
+  const candidate = await safePacketPath(historyRoot, packetPath);
+  if (!candidate) return false;
+  try {
+    const handle = await open(
+      candidate,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    try {
+      await assertRegularPacket(handle);
+      return true;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return false;
+  }
+};
+
+const readPacket = async (
+  historyRoot: string,
+  packetPath: string,
+): Promise<string | undefined> => {
+  const candidate = await safePacketPath(historyRoot, packetPath);
+  if (!candidate) return undefined;
+  try {
+    const handle = await open(
+      candidate,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    try {
+      return await readExact(handle, await assertRegularPacket(handle));
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return undefined;
+  }
+};
+
+const hasControlCharacter = (value: string): boolean =>
+  Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 0x20 || codePoint === 0x7f;
+  });
+
+const boundedString = (
+  value: unknown,
+  maxLength: number,
+  fallback = "",
+): string | undefined => {
+  if (value === undefined) return fallback;
+  if (
+    typeof value !== "string" ||
+    value.length > maxLength ||
+    hasControlCharacter(value)
+  ) {
+    return undefined;
+  }
+  return value;
+};
+
+const stringArray = (
+  value: unknown,
+  maxItems: number,
+  maxLength: number,
+): readonly string[] | undefined => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > maxItems) return undefined;
+  const result: string[] = [];
+  for (const item of value) {
+    const parsed = boundedString(item, maxLength);
+    if (parsed === undefined) return undefined;
+    result.push(parsed);
+  }
+  return result;
+};
+
+const parsePacketRef = (value: unknown): PacketRef | null | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  if (!("kind" in value) || value.kind !== "packet-ref") return null;
+  if (!("version" in value) || value.version !== 1) return undefined;
+
+  const packetKind = "packetKind" in value ? value.packetKind : undefined;
+  const path = "path" in value ? boundedString(value.path, 1_024) : undefined;
+  const timestamp =
+    "timestamp" in value ? boundedString(value.timestamp, 64) : "";
+  const topic = "topic" in value ? boundedString(value.topic, 160) : "";
+  const summary = "summary" in value ? boundedString(value.summary, 800) : "";
+  const tags = "tags" in value ? stringArray(value.tags, 24, 64) : [];
+  const files = "files" in value ? stringArray(value.files, 128, 500) : [];
+
+  if (
+    (packetKind !== "handoff" && packetKind !== "checkpoint") ||
+    !path ||
+    !PACKET_PATH.test(path) ||
+    timestamp === undefined ||
+    topic === undefined ||
+    summary === undefined ||
+    tags === undefined ||
+    files === undefined ||
+    files.some((file) => isAbsolute(file) || file.split("/").includes(".."))
+  ) {
+    return undefined;
+  }
+
+  return { packetKind, path, timestamp, topic, summary, tags, files };
+};
+
+const readIndex = async (
   historyDir: string,
-): Promise<readonly CorpusDocument[]> => {
+): Promise<
+  | { readonly status: Exclude<PacketIndexStatus, "ready"> }
+  | {
+      readonly status: "ready";
+      readonly historyRoot: string;
+      readonly refs: readonly PacketRef[];
+    }
+> => {
+  let historyRoot: string;
+  try {
+    historyRoot = await realpath(historyDir);
+  } catch (error) {
+    return { status: errorCode(error) === "ENOENT" ? "missing" : "unreadable" };
+  }
+
   let raw: string;
   try {
-    raw = await readFile(join(historyDir, "index.jsonl"), "utf8");
+    const handle = await open(
+      join(historyRoot, "index.jsonl"),
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    try {
+      const metadata = await handle.stat();
+      if (
+        !metadata.isFile() ||
+        metadata.nlink !== 1 ||
+        metadata.size > MAX_INDEX_BYTES ||
+        (metadata.mode & 0o022) !== 0
+      ) {
+        return { status: "unreadable" };
+      }
+      raw = await readExact(handle, metadata.size);
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    return { status: errorCode(error) === "ENOENT" ? "missing" : "unreadable" };
+  }
+
+  const lines = raw.split(/\r?\n/);
+  if (lines.length > MAX_INDEX_LINES) return { status: "corrupt" };
+  try {
+    const header = JSON.parse(lines[0] ?? "") as {
+      kind?: unknown;
+      version?: unknown;
+    };
+    if (header.kind !== "thread-index" || header.version !== 1) {
+      return { status: "corrupt" };
+    }
+  } catch {
+    return { status: "corrupt" };
+  }
+
+  const refs: PacketRef[] = [];
+  for (const line of lines.slice(1)) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = parsePacketRef(JSON.parse(line));
+      if (parsed === undefined) return { status: "corrupt" };
+      if (parsed) refs.push(parsed);
+    } catch {
+      return { status: "corrupt" };
+    }
+  }
+  return { status: "ready", historyRoot, refs };
+};
+
+/** Map validated index-v1 records to bounded search documents. */
+export const buildPacketDocs = async (
+  historyDir: string,
+): Promise<PacketDocsResult> => {
+  const index = await readIndex(historyDir);
+  if (index.status !== "ready") return { status: index.status, docs: [] };
+
+  const docs: CorpusDocument[] = [];
+  for (const entry of index.refs) {
+    if (!(await inspectPacket(index.historyRoot, entry.path))) continue;
+    docs.push({
+      title: entry.topic || entry.summary || entry.path,
+      content: [
+        entry.topic,
+        entry.summary,
+        entry.tags.join(" "),
+        entry.files.join(" "),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      date: entry.timestamp,
+      tags: entry.tags,
+      source: entry.packetKind,
+      filePath: entry.path,
+      excerpt: entry.summary,
+    });
+  }
+  return { status: "ready", docs };
+};
+
+/** Read only already-ranked packet bodies through the same confinement checks. */
+export const readPacketBodies = async (
+  historyDir: string,
+  locators: readonly string[],
+): Promise<readonly PacketBody[]> => {
+  let historyRoot: string;
+  try {
+    historyRoot = await realpath(historyDir);
   } catch {
     return [];
   }
 
-  const docs: CorpusDocument[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    let entry: PacketRef;
-    try {
-      entry = JSON.parse(trimmed) as PacketRef;
-    } catch {
-      continue; // skip malformed lines rather than fail the whole recall
-    }
-    if (entry.kind !== "packet-ref" || !entry.path) continue;
-
-    const tags = asStringArray(entry.tags);
-    const files = asStringArray(entry.files);
-    const topic = entry.topic ?? "";
-    const summary = entry.summary ?? "";
-
-    docs.push({
-      title: topic || summary || entry.path,
-      // BM25 corpus: fold every searchable signal into content so a query on a
-      // filename, tag, or topic all hit.
-      content: [topic, summary, tags.join(" "), files.join(" ")]
-        .filter(Boolean)
-        .join("\n"),
-      date: entry.timestamp ?? "",
-      tags,
-      source: entry.packetKind ?? "handoff",
-      filePath: entry.path, // the packet the agent reads to reconstruct context
-      excerpt: summary,
-    });
+  const bodies: PacketBody[] = [];
+  for (const locator of locators.slice(0, 3)) {
+    const content = await readPacket(historyRoot, locator);
+    if (content !== undefined) bodies.push({ locator, content });
   }
-
-  return docs;
+  return bodies;
 };
