@@ -1,0 +1,28 @@
+{
+  "contract": "model-picker.selection",
+  "version": 1,
+  "source": "snapshot",
+  "request": {
+    "task": "agent",
+    "agent": null,
+    "filter": null,
+    "limit": 1,
+    "weights": {
+      "speed": 0.4,
+      "price": 0.35,
+      "context": 0.25
+    }
+  },
+  "count": 1,
+  "choices": [
+    {
+      "id": "provider/model",
+      "name": "Model",
+      "score": 0.75,
+      "reasons": ["balanced"],
+      "contextWindow": 128000,
+      "outputPerMillion": 2,
+      "bestThroughput": 42
+    }
+  ]
+}

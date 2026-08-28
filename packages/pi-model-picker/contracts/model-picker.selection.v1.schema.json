@@ -1,0 +1,195 @@
+{
+  "type": "object",
+  "required": [
+    "contract",
+    "version",
+    "source",
+    "request",
+    "count",
+    "choices"
+  ],
+  "properties": {
+    "contract": {
+      "type": "string",
+      "const": "model-picker.selection"
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "source": {
+      "type": "string",
+      "const": "snapshot"
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "task",
+        "agent",
+        "filter",
+        "limit",
+        "weights"
+      ],
+      "properties": {
+        "task": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          ]
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "const": "amp"
+            },
+            {
+              "type": "string",
+              "const": "opencode"
+            },
+            {
+              "type": "string",
+              "const": "claude-code"
+            },
+            {
+              "type": "string",
+              "const": "codex"
+            },
+            {
+              "type": "string",
+              "const": "cursor"
+            }
+          ]
+        },
+        "filter": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "weights": {
+          "type": "object",
+          "required": [
+            "speed",
+            "price",
+            "context"
+          ],
+          "properties": {
+            "speed": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "price": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "context": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "choices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "score",
+          "reasons",
+          "contextWindow",
+          "outputPerMillion",
+          "bestThroughput"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "score": {
+            "type": "number"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "maxItems": 32
+          },
+          "contextWindow": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "outputPerMillion": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number",
+                "minimum": 0
+              }
+            ]
+          },
+          "bestThroughput": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number",
+                "minimum": 0
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "maxItems": 100
+    }
+  },
+  "$id": "https://model-picker.dev/contracts/model-picker.selection.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}

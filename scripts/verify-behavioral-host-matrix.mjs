@@ -271,5 +271,5 @@ await invokeCommandExpectingNotification(
   "The configured warm-memory archive path is unsafe.",
 );
 console.log(
-  `verify-host-matrix: ${host} loaded ${extensionPackages.join(", ")}, registered ${[...expectedCommands].sort().join(", ")}, and invoked warm-memory handlers`,
+  `verify-behavioral-host-matrix: ${host} loaded ${extensionPackages.join(", ")}, registered ${[...expectedCommands].sort().join(", ")}, and invoked warm-memory handlers`,
 );
