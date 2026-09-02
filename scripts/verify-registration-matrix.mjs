@@ -4,7 +4,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packagesRoot = join(root, "packages");
-const expectedPackages = ["pi-model-picker", "pi-sisyphus", "pi-warm-memory"];
+const expectedPackages = [
+  "@byhow/pi-model-picker",
+  "pi-sisyphus",
+  "pi-warm-memory",
+];
 const manifests = [];
 
 for (const entry of await readdir(packagesRoot, { withFileTypes: true })) {

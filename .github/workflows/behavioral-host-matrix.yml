@@ -20,14 +20,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [17.4.1, 18.0.3]
+        version: [17.4.1, 18.1.4]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.16.0 --ignore-scripts --registry=https://registry.npmjs.org
+          test "$(npm --version)" = 11.16.0
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --registry=https://registry.npmjs.org
       - name: Download exact OMP release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,7 +58,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.16.0 --ignore-scripts --registry=https://registry.npmjs.org
+          test "$(npm --version)" = 11.16.0
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --registry=https://registry.npmjs.org
       - name: Install exact upstream Pi
         env:
           NPM_CONFIG_USERCONFIG: /dev/null

@@ -1,7 +1,8 @@
-# pi-model-picker
+# @byhow/pi-model-picker
 
 ## 0.1.0
 
 - Add a thin Pi/OMP adapter for the reviewed model-picker launcher.
 - Validate recommendations against the canonical `model-picker.selection` v1 schema and cross-field invariants.
 - Register the clean-cutover `/model-picker` and `model_picker` surfaces.
+- Verify packed registration and command behavior in Pi 0.84.2 and OMP 17.4.1/18.1.4.

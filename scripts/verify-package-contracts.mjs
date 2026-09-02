@@ -6,7 +6,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packagesRoot = join(root, "packages");
 const expectedPeers = {
   "@earendil-works/pi-coding-agent": "0.84.2",
-  "@oh-my-pi/pi-coding-agent": "17.4.1 || 18.0.3",
+  "@oh-my-pi/pi-coding-agent": "17.4.1 || 18.1.4",
 };
 const failures = [];
 const fail = (packageName, message) =>
@@ -28,6 +28,15 @@ for (const entry of await readdir(packagesRoot, { withFileTypes: true })) {
   const packageName = manifest.name || entry.name;
   if (manifest.private === true)
     fail(packageName, "publishable packages must not be private");
+  if (
+    manifest.publishConfig?.access !== "public" ||
+    manifest.publishConfig?.registry !== "https://registry.npmjs.org/"
+  ) {
+    fail(
+      packageName,
+      "publishConfig must lock public publication to https://registry.npmjs.org/",
+    );
+  }
   if (manifest.type !== "module")
     fail(packageName, 'package type must be "module"');
   if (manifest.license !== "MIT" && manifest.license !== "Apache-2.0") {
