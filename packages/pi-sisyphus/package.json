@@ -1,6 +1,6 @@
 {
   "name": "pi-sisyphus",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Fail-closed Pi/OMP adapter for Sisyphus Trust Decisions and MCP Vet Evidence.",
   "type": "module",
   "exports": {
@@ -25,6 +25,10 @@
     "type": "git",
     "url": "https://github.com/byhow/pi-trust-mono.git",
     "directory": "packages/pi-sisyphus"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "keywords": [
     "authorization",
@@ -63,7 +67,7 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.2",
-    "@oh-my-pi/pi-coding-agent": "17.4.1 || 18.0.3"
+    "@oh-my-pi/pi-coding-agent": "17.4.1 || 18.1.4"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {

@@ -74,7 +74,11 @@ try {
       PI_SISYPHUS_BUNDLE_DIGEST: bundleDigest,
     },
   );
-  if (!trust.ok || trust.decision.effect !== "allow") {
+  if (
+    !trust.ok ||
+    trust.decision.effect !== "allow" ||
+    trust.decision.requestId !== "product-integration-read"
+  ) {
     throw new Error(
       "real Sisyphus evaluation did not allow the reviewed input",
     );
@@ -113,7 +117,11 @@ try {
     !selection.ok ||
     selection.selection.contract !== "model-picker.selection" ||
     selection.selection.version !== 1 ||
-    selection.selection.choices.length === 0
+    selection.selection.request.task !== "coding" ||
+    selection.selection.request.limit !== 2 ||
+    selection.selection.count !== selection.selection.choices.length ||
+    selection.selection.choices.length === 0 ||
+    selection.selection.choices.length > 2
   ) {
     throw new Error("real model-picker selection did not cross the adapter");
   }

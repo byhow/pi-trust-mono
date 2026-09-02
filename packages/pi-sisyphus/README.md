@@ -53,6 +53,6 @@ The adapter sends the bounded descriptor to `sy vet mcp -` and accepts only vers
 | Host | Verified version |
 |---|---|
 | Pi | 0.84.2 |
-| OMP | 17.4.1 and 18.0.3 |
+| OMP | 17.4.1 and 18.1.4 |
 
 Compile-time host interface checks live only under `test/`; they are not shipped as a compatibility facade. Packed-package registration is verified separately against each exact host.

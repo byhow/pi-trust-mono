@@ -1,4 +1,4 @@
-# pi-model-picker
+# @byhow/pi-model-picker
 
 Thin Pi/OMP adapter for the model-picker decision plane.
 
@@ -7,7 +7,7 @@ It invokes one reviewed absolute `model-picker` launcher, requests `model-picker
 ## Install
 
 ```sh
-pi install npm:pi-model-picker
+pi install npm:@byhow/pi-model-picker
 ```
 
 The same package manifest is consumed by OMP.
@@ -47,6 +47,6 @@ Invalid JSON, oversized output, schema drift, launcher failure, and non-zero exi
 | Host | Verified version |
 |---|---|
 | Pi | 0.84.2 |
-| OMP | 17.4.1 and 18.0.3 |
+| OMP | 17.4.1 and 18.1.4 |
 
 Compile-time host interface checks live only under `test/`; they are not included in the published package. Packed registration is tested separately against each exact host.

@@ -47,7 +47,7 @@ On first `/archive-session` the index header is seeded automatically — no post
 
 | Host | Tested version | Package behavior |
 |---|---|---|
-| Oh My Pi | 17.4.1 and 18.0.3 | Commands and conventional retrieval rule; configure the history root with `PI_WARM_HISTORY_DIR` |
+| Oh My Pi | 17.4.1 and 18.1.4 | Commands and conventional retrieval rule; configure the history root with `PI_WARM_HISTORY_DIR` |
 | Pi | 0.84.2 | Commands; configure the history root with `PI_WARM_HISTORY_DIR` |
 
 Other host versions are not claimed until their packed-package conformance test passes.
