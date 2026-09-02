@@ -29,9 +29,11 @@ npm run typecheck
 npm run test:coverage
 ```
 
-Run the packed behavioral matrix with checksum-verified official binaries for
-Pi 0.84.2, OMP 17.4.1, and OMP 18.1.4. Each lane must load the packed packages,
-register every declared surface, and invoke every command handler:
+Run the packed behavioral matrix with checksum-verified official release
+artifacts for OMP 17.4.1 and OMP 18.1.4. The Pi 0.84.2 lane installs the exact
+registry version with npm's registry-integrity verification enabled. Each lane
+must load the packed packages, register every declared surface, and invoke every
+command handler:
 
 ```sh
 PI_MATRIX_HOST=pi PI_MATRIX_BIN=/absolute/pi npm run verify:behavioral-host
