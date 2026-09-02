@@ -16,9 +16,10 @@ Do not publish this source under the unscoped name.
 
 ## Source and host gates
 
-From a clean checkout with Node 24 and npm 11.16.x:
+From a clean checkout with Node 24 and npm 11.16.0 exactly:
 
 ```sh
+test "$(npm --version)" = 11.16.0
 npm ci --ignore-scripts --registry=https://registry.npmjs.org
 npm run verify:lockfile
 npm run verify:contracts
