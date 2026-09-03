@@ -1,0 +1,59 @@
+{
+  "contract": "pi-sisyphus.canary-actions",
+  "contractVersion": 1,
+  "digestAlgorithm": "sha256",
+  "canonicalization": "json-stringify-ordered-v1",
+  "actions": [
+    {
+      "id": "normalize-slug",
+      "definitionVersion": 1,
+      "tool": "Bash",
+      "input": {
+        "command": "printf '%s\\n' 'hello-world'"
+      },
+      "resourceScope": "not-applicable",
+      "definitionDigest": "b71cc954cb8be9f9fdde1b1358aee81891898807bd732e9f7242ffaa116484f4"
+    },
+    {
+      "id": "read-only-scout",
+      "definitionVersion": 1,
+      "tool": "Read",
+      "input": {
+        "path": "README.md"
+      },
+      "resourceScope": "workspace",
+      "definitionDigest": "3221d3fe07320c622a343d22d7e3034a320f9ca8a76db882f4c6506a1434ce84"
+    },
+    {
+      "id": "denied-action",
+      "definitionVersion": 1,
+      "tool": "Write",
+      "input": {
+        "path": "fleet-lab-denied.txt",
+        "content": "this write must not be authorized\n"
+      },
+      "resourceScope": "workspace",
+      "definitionDigest": "cbe10151171b68884b7b997eb3faa4efdf51d0fad8713beae3b2b922950de64e"
+    },
+    {
+      "id": "worker-interruption",
+      "definitionVersion": 1,
+      "tool": "Bash",
+      "input": {
+        "command": "printf '%s\\n' 'worker-interruption-canary'"
+      },
+      "resourceScope": "not-applicable",
+      "definitionDigest": "b506334430112d27fb4c2db823feebe457a3ac1aa14355af61131965d25f7ef5"
+    },
+    {
+      "id": "coordinator-restart",
+      "definitionVersion": 1,
+      "tool": "Bash",
+      "input": {
+        "command": "printf '%s\\n' 'coordinator-restart-canary'"
+      },
+      "resourceScope": "not-applicable",
+      "definitionDigest": "073e43bca9a29380e21fce5a58875af34028b44f5bc09edfe4bb3114c39bbf11"
+    }
+  ]
+}

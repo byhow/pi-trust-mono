@@ -1,4 +1,8 @@
 export {
+  type CanaryActionDescriptor,
+  canaryActionDescriptors,
+} from "./canary-attestor.ts";
+export {
   evaluateTrust,
   resolveSisyphusBinary,
   resolveSisyphusConfig,

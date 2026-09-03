@@ -5,9 +5,12 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./extension": "./src/extension.ts"
+    "./extension": "./src/extension.ts",
+    "./canary-actions": "./canary-actions.json"
   },
   "files": [
+    "canary-actions.json",
+    "src/canary-attestor.ts",
     "src/engine.ts",
     "src/extension.ts",
     "src/index.ts",
