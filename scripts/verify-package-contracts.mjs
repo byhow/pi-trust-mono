@@ -120,10 +120,15 @@ for (const entry of await readdir(packagesRoot, { withFileTypes: true })) {
       );
     }
     const events = manifest.hostConformance?.events ?? [];
+    const supportedEvents = new Set([
+      "session_shutdown",
+      "tool_call",
+      "tool_result",
+    ]);
     if (
       !Array.isArray(events) ||
       new Set(events).size !== events.length ||
-      events.some((event) => event !== "tool_call")
+      events.some((event) => !supportedEvents.has(event))
     ) {
       fail(packageName, "hostConformance.events contains an unsupported event");
     }
