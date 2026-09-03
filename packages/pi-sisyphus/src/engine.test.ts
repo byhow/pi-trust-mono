@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import {
   evaluateTrust,
+  evaluateTrustWithProvenance,
   resolveSisyphusConfig,
   type TrustExecutor,
 } from "./engine.ts";
@@ -15,6 +16,7 @@ const environment = {
   PI_SISYPHUS_BUNDLE_DIGEST: "a".repeat(64),
   PI_SISYPHUS_DECISION_LOG: "/private/decisions.jsonl",
 };
+const binding = { aggregateDigest: "a".repeat(64) };
 
 const input: TrustInput = {
   version: 1,
@@ -59,6 +61,52 @@ describe("resolveSisyphusConfig", () => {
 });
 
 describe("evaluateTrust", () => {
+  test("preserves the exact public result shape when canary support is unarmed", async () => {
+    const execute: TrustExecutor = async () => ({
+      code: 0,
+      killed: false,
+      stdout: decision("allow"),
+    });
+
+    await expect(evaluateTrust(input, environment, execute)).resolves.toEqual({
+      ok: true,
+      decision: JSON.parse(decision("allow")),
+    });
+
+    await expect(
+      evaluateTrust(input, environment, async () => {
+        throw new Error("unavailable");
+      }),
+    ).resolves.toEqual({ ok: false, code: "engine-unavailable" });
+  });
+
+  test("keeps canary arming out of the existing engine configuration boundary", async () => {
+    const execute: TrustExecutor = vi.fn(async (config) => {
+      expect(config).toEqual({
+        binary: environment.PI_SISYPHUS_BIN,
+        bundleDir: environment.PI_SISYPHUS_BUNDLE_DIR,
+        bundleDigest: environment.PI_SISYPHUS_BUNDLE_DIGEST,
+        decisionLog: environment.PI_SISYPHUS_DECISION_LOG,
+      });
+      return { code: 0, killed: false, stdout: decision("allow") };
+    });
+
+    await expect(
+      evaluateTrust(
+        input,
+        {
+          ...environment,
+          PI_SISYPHUS_CANARY_MODE: "fleet-lab-v1",
+          PI_SISYPHUS_CANARY_ACTION: "read-only-scout",
+        },
+        execute,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      decision: JSON.parse(decision("allow")),
+    });
+  });
+
   test.each([
     ["allow", 0],
     ["deny", 1],
@@ -195,5 +243,21 @@ describe("evaluateTrust", () => {
       ),
     ).toEqual({ ok: false, code: "policy-config-invalid" });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  test("keeps aggregate bundle provenance on the private evaluation path", async () => {
+    const execute: TrustExecutor = async () => ({
+      code: 0,
+      killed: false,
+      stdout: decision("allow"),
+    });
+
+    await expect(
+      evaluateTrustWithProvenance(input, environment, execute),
+    ).resolves.toEqual({
+      ok: true,
+      decision: JSON.parse(decision("allow")),
+      binding,
+    });
   });
 });

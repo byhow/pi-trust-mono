@@ -23,6 +23,25 @@ export type TrustExecutor = (
   input: string,
 ) => Promise<SisyphusProcessResult>;
 
+type SisyphusPolicyBinding = {
+  readonly aggregateDigest: string;
+};
+
+export type ProvenanceBoundTrustEvaluation =
+  | {
+      readonly ok: true;
+      readonly decision: TrustDecision;
+      readonly binding: SisyphusPolicyBinding;
+    }
+  | {
+      readonly ok: false;
+      readonly code:
+        | "policy-config-invalid"
+        | "engine-unavailable"
+        | "engine-invalid";
+      readonly binding?: SisyphusPolicyBinding;
+    };
+
 const hasControlCharacter = (value: string): boolean => {
   for (const character of value) {
     const code = character.codePointAt(0);
@@ -170,21 +189,26 @@ const executeTrust: TrustExecutor = (config, input) =>
       : {}),
   });
 
-export const evaluateTrust = async (
+export const evaluateTrustWithProvenance = async (
   input: TrustInput,
   environment: Readonly<Record<string, string | undefined>> = process.env,
   execute: TrustExecutor = executeTrust,
-): Promise<TrustEvaluation> => {
+): Promise<ProvenanceBoundTrustEvaluation> => {
   const config = resolveSisyphusConfig(environment);
   const serialized = serializeInput(input);
-  if (!config || !serialized) {
+  if (!config) {
     return { ok: false, code: "policy-config-invalid" };
+  }
+
+  const binding = { aggregateDigest: config.bundleDigest };
+  if (!serialized) {
+    return { ok: false, code: "policy-config-invalid", binding };
   }
 
   try {
     const result = await execute(config, serialized);
     if (result.killed || result.code < 0) {
-      return { ok: false, code: "engine-unavailable" };
+      return { ok: false, code: "engine-unavailable", binding };
     }
     const decision = parseDecision(result.stdout);
     const expectedExit = decision
@@ -195,10 +219,20 @@ export const evaluateTrust = async (
       decision.requestId !== input.requestId ||
       result.code !== expectedExit
     ) {
-      return { ok: false, code: "engine-invalid" };
+      return { ok: false, code: "engine-invalid", binding };
     }
-    return { ok: true, decision };
+    return { ok: true, decision, binding };
   } catch {
-    return { ok: false, code: "engine-unavailable" };
+    return { ok: false, code: "engine-unavailable", binding };
   }
+};
+
+export const evaluateTrust = async (
+  input: TrustInput,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  execute: TrustExecutor = executeTrust,
+): Promise<TrustEvaluation> => {
+  const { binding: _binding, ...evaluation } =
+    await evaluateTrustWithProvenance(input, environment, execute);
+  return evaluation;
 };

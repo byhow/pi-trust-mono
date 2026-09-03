@@ -6,7 +6,15 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { evaluateTrust } from "./engine.ts";
+import {
+  CanaryAttestationError,
+  createCanaryAttestor,
+} from "./canary-attestor.ts";
+import {
+  evaluateTrust,
+  evaluateTrustWithProvenance,
+  type ProvenanceBoundTrustEvaluation,
+} from "./engine.ts";
 import { vetMcp } from "./mcp.ts";
 import { classifyResourceScope } from "./resource-scope.ts";
 import type {
@@ -139,10 +147,16 @@ export const createToolPolicyHandler =
       evaluation = await evaluate(
         await policyInput(event.toolCallId, event.toolName, input, ctx.cwd),
       );
-    } catch {
+    } catch (error) {
+      if (!(error instanceof CanaryAttestationError)) {
+        return {
+          block: true,
+          reason: "Policy enforcement failed closed (engine-unavailable).",
+        };
+      }
       return {
         block: true,
-        reason: "Policy enforcement failed closed (engine-unavailable).",
+        reason: `Canary attestation failed closed (${error.code}).`,
       };
     }
     if (evaluation.ok && evaluation.decision.effect === "allow")
@@ -161,6 +175,22 @@ export const createToolPolicyHandler =
       reason: `${prefix}: ${evaluation.decision.reason}`,
     };
   };
+
+const publicEvaluation = (
+  evaluation: ProvenanceBoundTrustEvaluation,
+): TrustEvaluation =>
+  evaluation.ok
+    ? { ok: true, decision: evaluation.decision }
+    : { ok: false, code: evaluation.code };
+
+const createAttestedToolPolicyHandler = () => {
+  const attestor = createCanaryAttestor();
+  return createToolPolicyHandler(async (input) => {
+    const evaluation = await evaluateTrustWithProvenance(input);
+    await attestor.record(input, evaluation);
+    return publicEvaluation(evaluation);
+  });
+};
 
 const resultText = (evaluation: TrustEvaluation): string =>
   evaluation.ok
@@ -231,7 +261,7 @@ export const createPiSisyphusExtension =
   (api: ExtensionAPI): void => {
     const evaluate = services.evaluate ?? evaluateTrust;
     const vet = services.vet ?? vetMcp;
-    api.on("tool_call", createToolPolicyHandler(evaluate));
+    api.on("tool_call", createAttestedToolPolicyHandler());
     api.registerTool(createPolicyTool(evaluate));
     api.registerTool(createMcpVetTool(vet));
     api.registerCommand("permit", {
