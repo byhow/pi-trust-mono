@@ -84,6 +84,14 @@ describe("createCanaryAttestor", () => {
     await expect(attestor.record(input, evaluation)).resolves.toBe(
       "not-target",
     );
+    await expect(
+      attestor.complete({
+        toolCallId: input.requestId,
+        toolName: "read",
+        isError: false,
+      }),
+    ).resolves.toBe("not-pending");
+    expect(() => attestor.shutdown()).not.toThrow();
   });
 
   test("durably records a closed decision attestation for an exact target", async () => {
@@ -185,6 +193,14 @@ describe("createCanaryAttestor", () => {
     await expect(attestor.record(input, evaluation)).rejects.toMatchObject({
       code: "configuration-invalid",
     });
+    await expect(
+      attestor.complete({
+        toolCallId: input.requestId,
+        toolName: "read",
+        isError: false,
+      }),
+    ).rejects.toMatchObject({ code: "configuration-invalid" });
+    expect(() => attestor.shutdown()).not.toThrow();
   });
 
   test("rejects credential-shaped policy identities before publication", async () => {
@@ -282,6 +298,13 @@ describe("createCanaryAttestor", () => {
       };
 
       await attestor.record(input, changed);
+      await expect(
+        attestor.complete({
+          toolCallId: input.requestId,
+          toolName: "read",
+          isError: false,
+        }),
+      ).resolves.toBe("not-pending");
       const [name] = await receiptFiles(
         environment.PI_SISYPHUS_CANARY_RECEIPT_DIR,
       );
@@ -324,6 +347,13 @@ describe("createCanaryAttestor", () => {
       };
 
       await attestor.record(input, failure);
+      await expect(
+        attestor.complete({
+          toolCallId: input.requestId,
+          toolName: "read",
+          isError: false,
+        }),
+      ).resolves.toBe("not-pending");
       const [name] = await receiptFiles(
         environment.PI_SISYPHUS_CANARY_RECEIPT_DIR,
       );
@@ -386,18 +416,188 @@ describe("createCanaryAttestor", () => {
     ).toHaveLength(0);
   });
 
-  test("emits one immutable receipt per duplicate matching call", async () => {
+  test("fails closed when an allowed tool-call identifier is reused", async () => {
     const environment = await armedEnvironment();
     const attestor = createCanaryAttestor(environment);
 
     await attestor.record(input, evaluation);
+    await expect(attestor.record(input, evaluation)).rejects.toMatchObject({
+      code: "receipt-unavailable",
+    });
+
+    const names = await receiptFiles(
+      environment.PI_SISYPHUS_CANARY_RECEIPT_DIR,
+    );
+    expect(names).toHaveLength(1);
+    expect(names[0]).toMatch(/^attestation-/u);
+  });
+
+  test("does not reuse an identifier first recorded for a blocked decision", async () => {
+    const environment = await armedEnvironment();
+    const attestor = createCanaryAttestor(environment);
+    const denied: ProvenanceBoundTrustEvaluation = {
+      ...evaluation,
+      decision: { ...evaluation.decision, effect: "deny" },
+    };
+
+    await attestor.record(input, denied);
+    await expect(attestor.record(input, evaluation)).rejects.toMatchObject({
+      code: "receipt-unavailable",
+    });
+    expect(
+      await receiptFiles(environment.PI_SISYPHUS_CANARY_RECEIPT_DIR),
+    ).toHaveLength(1);
+  });
+
+  test("records one closed error-or-cancellation outcome and retires it", async () => {
+    const environment = await armedEnvironment();
+    const attestor = createCanaryAttestor(environment);
+
     await attestor.record(input, evaluation);
+    await expect(
+      attestor.complete({
+        toolCallId: input.requestId,
+        toolName: "read",
+        isError: true,
+      }),
+    ).resolves.toBe("recorded");
+    await expect(
+      attestor.complete({
+        toolCallId: input.requestId,
+        toolName: "read",
+        isError: false,
+      }),
+    ).resolves.toBe("not-pending");
+    await expect(attestor.record(input, evaluation)).rejects.toMatchObject({
+      code: "receipt-unavailable",
+    });
 
     const names = await receiptFiles(
       environment.PI_SISYPHUS_CANARY_RECEIPT_DIR,
     );
     expect(names).toHaveLength(2);
-    expect(new Set(names).size).toBe(2);
+    const completionName = names.find((name) => name.startsWith("completion-"));
+    const completionPath = join(
+      environment.PI_SISYPHUS_CANARY_RECEIPT_DIR,
+      completionName ?? "missing",
+    );
+    expect(JSON.parse(await readFile(completionPath, "utf8"))).toMatchObject({
+      contract: "zoysia.fleet-lab.sisyphus-completion",
+      contractVersion: 1,
+      outcome: "tool-error-or-cancelled",
+    });
+    expect((await stat(completionPath)).mode & 0o777).toBe(0o400);
+  });
+
+  test.each([
+    { toolName: "write", isError: false },
+    { toolName: "Read", isError: false },
+    { toolName: "read", isError: undefined },
+  ])(
+    "retires a mismatched or ambiguous result without minting: %j",
+    async (result) => {
+      const environment = await armedEnvironment();
+      const attestor = createCanaryAttestor(environment);
+
+      await attestor.record(input, evaluation);
+      await expect(
+        attestor.complete({ toolCallId: input.requestId, ...result }),
+      ).resolves.toBe("retired");
+      await expect(
+        attestor.complete({
+          toolCallId: input.requestId,
+          toolName: "read",
+          isError: false,
+        }),
+      ).resolves.toBe("not-pending");
+      expect(
+        await receiptFiles(environment.PI_SISYPHUS_CANARY_RECEIPT_DIR),
+      ).toHaveLength(1);
+    },
+  );
+
+  test("clears pending state on shutdown without claiming completion", async () => {
+    const environment = await armedEnvironment();
+    const attestor = createCanaryAttestor(environment);
+
+    await attestor.record(input, evaluation);
+    attestor.shutdown();
+    await expect(
+      attestor.complete({
+        toolCallId: input.requestId,
+        toolName: "read",
+        isError: false,
+      }),
+    ).resolves.toBe("not-pending");
+    await expect(
+      attestor.record(
+        { ...input, requestId: "call-after-shutdown" },
+        evaluation,
+      ),
+    ).rejects.toMatchObject({ code: "receipt-unavailable" });
+    expect(
+      await receiptFiles(environment.PI_SISYPHUS_CANARY_RECEIPT_DIR),
+    ).toHaveLength(1);
+  });
+
+  test("retires the pending result when completion publication fails", async () => {
+    const environment = await armedEnvironment();
+    const attestor = createCanaryAttestor(environment);
+
+    await attestor.record(input, evaluation);
+    await chmod(environment.PI_SISYPHUS_CANARY_RECEIPT_DIR, 0o755);
+    await expect(
+      attestor.complete({
+        toolCallId: input.requestId,
+        toolName: "read",
+        isError: false,
+      }),
+    ).rejects.toMatchObject({ code: "sink-invalid" });
+    await expect(
+      attestor.complete({
+        toolCallId: input.requestId,
+        toolName: "read",
+        isError: false,
+      }),
+    ).resolves.toBe("not-pending");
+    expect(
+      await receiptFiles(environment.PI_SISYPHUS_CANARY_RECEIPT_DIR),
+    ).toHaveLength(1);
+  });
+
+  test("bounds pending correlations and completes each accepted identifier once", async () => {
+    const environment = await armedEnvironment();
+    const attestor = createCanaryAttestor(environment);
+    const accepted = Array.from({ length: 16 }, (_, index) => `call-${index}`);
+
+    for (const requestId of accepted) {
+      await attestor.record(
+        { ...input, requestId },
+        {
+          ...evaluation,
+          decision: { ...evaluation.decision, requestId },
+        },
+      );
+    }
+    const overflowId = "call-overflow";
+    await expect(
+      attestor.record(
+        { ...input, requestId: overflowId },
+        {
+          ...evaluation,
+          decision: { ...evaluation.decision, requestId: overflowId },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "receipt-unavailable" });
+
+    for (const toolCallId of accepted) {
+      await expect(
+        attestor.complete({ toolCallId, toolName: "read", isError: false }),
+      ).resolves.toBe("recorded");
+    }
+    expect(
+      await receiptFiles(environment.PI_SISYPHUS_CANARY_RECEIPT_DIR),
+    ).toHaveLength(32);
   });
 
   test("serializes concurrent publications so the receipt cap cannot race", async () => {

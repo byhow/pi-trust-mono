@@ -13,11 +13,14 @@ import { isDeepStrictEqual } from "node:util";
 import type { ProvenanceBoundTrustEvaluation } from "./engine.ts";
 import type { TrustInput } from "./types.ts";
 
-const CONTRACT = "zoysia.fleet-lab.sisyphus-attestation";
+const ATTESTATION_CONTRACT = "zoysia.fleet-lab.sisyphus-attestation";
+const COMPLETION_CONTRACT = "zoysia.fleet-lab.sisyphus-completion";
 const MODE = "fleet-lab-v1";
-const RECEIPT_PREFIX = "attestation-";
+const ATTESTATION_PREFIX = "attestation-";
+const COMPLETION_PREFIX = "completion-";
 const RECEIPT_SUFFIX = ".json";
 const MAX_RECEIPTS = 32;
+const MAX_COMPLETION_CORRELATIONS = 16;
 const MAX_RECEIPT_BYTES = 4 * 1024;
 const MAX_POLICY_ID_BYTES = 146;
 const DIRECTORY_MODE = 0o700;
@@ -34,7 +37,7 @@ const FAILURE_CODES = new Set([
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const POLICY_ID_PATTERN = /^sisyphus:\/\/bundle\/[a-z0-9][a-z0-9._-]{0,127}$/u;
 const RECEIPT_NAME_PATTERN =
-  /^attestation-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/u;
+  /^(?:attestation|completion)-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
@@ -132,12 +135,21 @@ export const canaryActionDescriptors: readonly CanaryActionDescriptor[] =
   );
 
 export type CanaryRecordResult = "not-target" | "recorded";
+export type CanaryCompletionResult = "not-pending" | "recorded" | "retired";
+
+export type CanaryToolResult = {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly isError: boolean | undefined;
+};
 
 export interface CanaryAttestor {
   record(
     input: TrustInput,
     evaluation: ProvenanceBoundTrustEvaluation,
   ): Promise<CanaryRecordResult>;
+  complete(result: CanaryToolResult): Promise<CanaryCompletionResult>;
+  shutdown(): void;
 }
 
 export type CanaryAttestationErrorCode =
@@ -172,12 +184,20 @@ const disabledAttestor: CanaryAttestor = {
   async record() {
     return "not-target";
   },
+  async complete() {
+    return "not-pending";
+  },
+  shutdown() {},
 };
 
 const invalidAttestor: CanaryAttestor = {
   async record() {
     throw new CanaryAttestationError("configuration-invalid");
   },
+  async complete() {
+    throw new CanaryAttestationError("configuration-invalid");
+  },
+  shutdown() {},
 };
 
 const hasControlCharacter = (value: string): boolean => {
@@ -358,6 +378,7 @@ const syncDirectory = async (
 
 const publishReceipt = async (
   receiptDir: string,
+  prefix: typeof ATTESTATION_PREFIX | typeof COMPLETION_PREFIX,
   contents: string,
   runtime: AttestorRuntime,
 ): Promise<void> => {
@@ -374,11 +395,8 @@ const publishReceipt = async (
     if (!UUID_PATTERN.test(id)) {
       throw new CanaryAttestationError("receipt-unavailable");
     }
-    const temporaryPath = join(receiptDir, `.${RECEIPT_PREFIX}${id}.tmp`);
-    const finalPath = join(
-      receiptDir,
-      `${RECEIPT_PREFIX}${id}${RECEIPT_SUFFIX}`,
-    );
+    const temporaryPath = join(receiptDir, `.${prefix}${id}.tmp`);
+    const finalPath = join(receiptDir, `${prefix}${id}${RECEIPT_SUFFIX}`);
     let temporary: FileHandle | undefined;
     let published = false;
     try {
@@ -469,8 +487,34 @@ const policyBinding = (
   return binding;
 };
 
-const receiptFor = (
+type CanaryReceiptIdentity = {
+  readonly sourceVersion: 1;
+  readonly action: CanaryActionDescriptor;
+  readonly challenge: string;
+  readonly policy: {
+    readonly id: string;
+    readonly aggregateBundleDigest: string;
+  };
+};
+
+const receiptIdentity = (
   configuration: ArmedConfiguration,
+  evaluation: ProvenanceBoundTrustEvaluation,
+): CanaryReceiptIdentity => {
+  const binding = policyBinding(evaluation);
+  return Object.freeze({
+    sourceVersion: 1,
+    action: configuration.actionDescriptor,
+    challenge: configuration.challenge,
+    policy: Object.freeze({
+      id: configuration.policyId,
+      aggregateBundleDigest: binding.aggregateDigest,
+    }),
+  });
+};
+
+const attestationReceiptFor = (
+  identity: CanaryReceiptIdentity,
   evaluation: ProvenanceBoundTrustEvaluation,
 ): string => {
   if (
@@ -479,44 +523,111 @@ const receiptFor = (
   ) {
     throw new CanaryAttestationError("receipt-unavailable");
   }
-  const binding = policyBinding(evaluation);
-  const identity = {
-    contract: CONTRACT,
+  const attestationIdentity = {
+    contract: ATTESTATION_CONTRACT,
     contractVersion: 1,
-    sourceVersion: 1,
-    action: configuration.actionDescriptor,
-    challenge: configuration.challenge,
-    policy: {
-      id: configuration.policyId,
-      aggregateBundleDigest: binding.aggregateDigest,
-    },
+    ...identity,
   } as const;
   return `${JSON.stringify(
     evaluation.ok
       ? {
-          ...identity,
+          ...attestationIdentity,
           result: "decision",
           effect: evaluation.decision.effect,
         }
-      : { ...identity, result: "failure", code: evaluation.code },
+      : { ...attestationIdentity, result: "failure", code: evaluation.code },
   )}\n`;
 };
+
+const completionReceiptFor = (
+  identity: CanaryReceiptIdentity,
+  outcome: "success" | "tool-error-or-cancelled",
+): string =>
+  `${JSON.stringify({
+    contract: COMPLETION_CONTRACT,
+    contractVersion: 1,
+    ...identity,
+    outcome,
+  })}\n`;
 
 const armedAttestor = (
   configuration: ArmedConfiguration,
   runtime: AttestorRuntime,
 ): CanaryAttestor => {
   let publication = Promise.resolve();
+  let closed = false;
+  const pendingCompletions = new Map<string, CanaryReceiptIdentity>();
+  const seenTargetToolCallIds = new Set<string>();
+
+  const serialize = <Result>(operation: () => Promise<Result>) => {
+    const current = publication.then(operation);
+    publication = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
+  };
+
   return {
     async record(input, evaluation) {
       if (!isTarget(configuration.action, input)) return "not-target";
-      const contents = receiptFor(configuration, evaluation);
-      const current = publication.then(() =>
-        publishReceipt(configuration.receiptDir, contents, runtime),
-      );
-      publication = current.catch(() => undefined);
-      await current;
+      const identity = receiptIdentity(configuration, evaluation);
+      const contents = attestationReceiptFor(identity, evaluation);
+      const armsCompletion =
+        evaluation.ok && evaluation.decision.effect === "allow";
+      await serialize(async () => {
+        if (
+          closed ||
+          seenTargetToolCallIds.size >= MAX_RECEIPTS ||
+          seenTargetToolCallIds.has(input.requestId) ||
+          (armsCompletion &&
+            pendingCompletions.size >= MAX_COMPLETION_CORRELATIONS)
+        ) {
+          throw new CanaryAttestationError("receipt-unavailable");
+        }
+        await publishReceipt(
+          configuration.receiptDir,
+          ATTESTATION_PREFIX,
+          contents,
+          runtime,
+        );
+        seenTargetToolCallIds.add(input.requestId);
+        if (armsCompletion) {
+          if (closed) {
+            throw new CanaryAttestationError("receipt-unavailable");
+          }
+          pendingCompletions.set(input.requestId, identity);
+        }
+      });
       return "recorded";
+    },
+    async complete(result) {
+      const identity = pendingCompletions.get(result.toolCallId);
+      if (!identity) return "not-pending";
+      pendingCompletions.delete(result.toolCallId);
+      if (
+        result.toolName !== configuration.action.tool.toLowerCase() ||
+        typeof result.isError !== "boolean"
+      ) {
+        return "retired";
+      }
+      const outcome = result.isError ? "tool-error-or-cancelled" : "success";
+      const contents = completionReceiptFor(identity, outcome);
+      return serialize(async () => {
+        if (closed) return "retired";
+        await publishReceipt(
+          configuration.receiptDir,
+          COMPLETION_PREFIX,
+          contents,
+          runtime,
+        );
+        return "recorded";
+      });
+    },
+    shutdown() {
+      closed = true;
+      pendingCompletions.clear();
+      seenTargetToolCallIds.clear();
     },
   };
 };

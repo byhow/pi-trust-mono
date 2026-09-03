@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { canaryActionDescriptors } from "./canary-attestor.ts";
 import {
   createPiSisyphusExtension,
   createToolPolicyHandler,
@@ -255,20 +256,22 @@ const commandContext = () => ({
   ui: { notify: vi.fn() },
 });
 
-const armRealCanaryEngine = async () => {
+const armRealCanaryEngine = async (
+  effect: "allow" | "deny" | "ask" | "modify" = "allow",
+) => {
   const directory = await mkdtemp(join(tmpdir(), "pi-sisyphus-extension-"));
   temporaryDirectories.push(directory);
   const binary = join(directory, "sy");
   const workspace = join(directory, "workspace");
   const receiptDir = join(directory, "receipts");
-  const allowed = decision("allow");
-  if (!allowed.ok) throw new Error("allow fixture is invalid");
+  const evaluated = decision(effect);
+  if (!evaluated.ok) throw new Error("decision fixture is invalid");
   await mkdir(workspace, { mode: 0o700 });
   await mkdir(receiptDir, { mode: 0o700 });
   await writeFile(join(workspace, "README.md"), "public canary\n", "utf8");
   await writeFile(
     binary,
-    `#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '${JSON.stringify(allowed.decision)}'\n`,
+    `#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '${JSON.stringify(evaluated.decision)}'\nexit ${{ allow: 0, deny: 1, ask: 2, modify: 3 }[effect]}\n`,
     "utf8",
   );
   await chmod(binary, 0o755);
@@ -289,6 +292,197 @@ const armRealCanaryEngine = async () => {
 };
 
 describe("actual tool-call canary attestation", () => {
+  test("publishes one metadata-only completion after an allowed target succeeds", async () => {
+    const { receiptDir, workspace } = await armRealCanaryEngine();
+    const registered = register(
+      async () => decision("deny"),
+      async () => evidence,
+    );
+    const callHandler = registered.eventHandlers.get("tool_call");
+    const resultHandler = registered.eventHandlers.get("tool_result");
+    if (!callHandler) throw new Error("tool_call handler missing");
+    if (!resultHandler) throw new Error("tool_result handler missing");
+
+    await callHandler(event as never, { cwd: workspace } as never);
+    await resultHandler(
+      {
+        type: "tool_result",
+        toolCallId: "call-1",
+        toolName: "read",
+        input: { path: "README.md", secret: "must-not-persist" },
+        content: [{ type: "text", text: "must-not-persist" }],
+        details: { secret: "must-not-persist" },
+        isError: false,
+      } as never,
+      { cwd: workspace } as never,
+    );
+
+    const completionName = (await readdir(receiptDir)).find((name) =>
+      name.startsWith("completion-"),
+    );
+    expect(completionName).toMatch(/^completion-[0-9a-f-]{36}\.json$/u);
+    const completion = JSON.parse(
+      await readFile(join(receiptDir, completionName ?? "missing"), "utf8"),
+    );
+    expect(completion).toEqual({
+      contract: "zoysia.fleet-lab.sisyphus-completion",
+      contractVersion: 1,
+      sourceVersion: 1,
+      action: {
+        id: "read-only-scout",
+        definitionVersion: 1,
+        definitionDigest: canaryActionDescriptors.find(
+          ({ id }) => id === "read-only-scout",
+        )?.definitionDigest,
+      },
+      challenge: "c".repeat(43),
+      policy: {
+        id: "sisyphus://bundle/v1",
+        aggregateBundleDigest: "a".repeat(64),
+      },
+      outcome: "success",
+    });
+    expect(JSON.stringify(completion)).not.toContain("must-not-persist");
+    expect(JSON.stringify(completion)).not.toContain("call-1");
+    expect(Object.keys(completion).sort()).toEqual([
+      "action",
+      "challenge",
+      "contract",
+      "contractVersion",
+      "outcome",
+      "policy",
+      "sourceVersion",
+    ]);
+  });
+
+  test("publishes the native hook's closed tool-error-or-cancelled outcome", async () => {
+    const { receiptDir, workspace } = await armRealCanaryEngine();
+    const registered = register(
+      async () => decision("deny"),
+      async () => evidence,
+    );
+    const callHandler = registered.eventHandlers.get("tool_call");
+    const resultHandler = registered.eventHandlers.get("tool_result");
+    if (!callHandler || !resultHandler) throw new Error("hook handler missing");
+
+    await callHandler(event as never, { cwd: workspace } as never);
+    await resultHandler(
+      {
+        type: "tool_result",
+        toolCallId: "call-1",
+        toolName: "read",
+        input: { path: "README.md" },
+        content: [{ type: "text", text: "Operation aborted" }],
+        details: undefined,
+        isError: true,
+      } as never,
+      { cwd: workspace } as never,
+    );
+
+    const completionName = (await readdir(receiptDir)).find((name) =>
+      name.startsWith("completion-"),
+    );
+    expect(
+      JSON.parse(
+        await readFile(join(receiptDir, completionName ?? "missing"), "utf8"),
+      ),
+    ).toMatchObject({ outcome: "tool-error-or-cancelled" });
+  });
+
+  test("does not complete a denied call or a pending call after shutdown", async () => {
+    const denied = await armRealCanaryEngine("deny");
+    let registered = register(
+      async () => decision("allow"),
+      async () => evidence,
+    );
+    let callHandler = registered.eventHandlers.get("tool_call");
+    let resultHandler = registered.eventHandlers.get("tool_result");
+    if (!callHandler || !resultHandler) throw new Error("hook handler missing");
+
+    await expect(
+      callHandler(event as never, { cwd: denied.workspace } as never),
+    ).resolves.toMatchObject({ block: true });
+    await resultHandler(
+      {
+        type: "tool_result",
+        toolCallId: "call-1",
+        toolName: "read",
+        input: { path: "README.md" },
+        content: [],
+        details: undefined,
+        isError: false,
+      } as never,
+      { cwd: denied.workspace } as never,
+    );
+    expect(
+      (await readdir(denied.receiptDir)).filter((name) =>
+        name.startsWith("completion-"),
+      ),
+    ).toEqual([]);
+
+    const allowed = await armRealCanaryEngine();
+    registered = register(
+      async () => decision("deny"),
+      async () => evidence,
+    );
+    callHandler = registered.eventHandlers.get("tool_call");
+    resultHandler = registered.eventHandlers.get("tool_result");
+    const shutdownHandler = registered.eventHandlers.get("session_shutdown");
+    if (!callHandler || !resultHandler || !shutdownHandler) {
+      throw new Error("lifecycle hook handler missing");
+    }
+    await callHandler(event as never, { cwd: allowed.workspace } as never);
+    await shutdownHandler(
+      { type: "session_shutdown", reason: "reload" } as never,
+      { cwd: allowed.workspace } as never,
+    );
+    await resultHandler(
+      {
+        type: "tool_result",
+        toolCallId: "call-1",
+        toolName: "read",
+        input: { path: "README.md" },
+        content: [],
+        details: undefined,
+        isError: false,
+      } as never,
+      { cwd: allowed.workspace } as never,
+    );
+    expect(
+      (await readdir(allowed.receiptDir)).filter((name) =>
+        name.startsWith("completion-"),
+      ),
+    ).toEqual([]);
+  });
+
+  test("does not mint from a non-target call and its matching result", async () => {
+    const { receiptDir, workspace } = await armRealCanaryEngine();
+    const registered = register(
+      async () => decision("deny"),
+      async () => evidence,
+    );
+    const callHandler = registered.eventHandlers.get("tool_call");
+    const resultHandler = registered.eventHandlers.get("tool_result");
+    if (!callHandler || !resultHandler) throw new Error("hook handler missing");
+    const nonTarget = { ...event, input: { path: "OTHER.md" } };
+
+    await callHandler(nonTarget as never, { cwd: workspace } as never);
+    await resultHandler(
+      {
+        type: "tool_result",
+        toolCallId: "call-1",
+        toolName: "read",
+        input: { path: "OTHER.md" },
+        content: [{ type: "text", text: "untrusted result" }],
+        details: undefined,
+        isError: false,
+      } as never,
+      { cwd: workspace } as never,
+    );
+
+    await expect(readdir(receiptDir)).resolves.toEqual([]);
+  });
+
   test("uses the real Sisyphus evaluation path before recording", async () => {
     const { receiptDir, workspace } = await armRealCanaryEngine();
     const injectedEvaluate = vi.fn(async () => decision("deny"));
@@ -358,6 +552,20 @@ describe("actual tool-call canary attestation", () => {
         JSON.stringify({ name: "docs", transport: "http" }),
         commandContext() as never,
       );
+    const resultHandler = registered.eventHandlers.get("tool_result");
+    if (!resultHandler) throw new Error("tool_result handler missing");
+    await resultHandler(
+      {
+        type: "tool_result",
+        toolCallId: "call-1",
+        toolName: "read",
+        input: { path: "README.md" },
+        content: [],
+        details: undefined,
+        isError: false,
+      } as never,
+      { cwd: workspace } as never,
+    );
 
     await expect(readdir(receiptDir)).resolves.toEqual([]);
   });
@@ -369,7 +577,11 @@ describe("pi-sisyphus diagnostics", () => {
       async () => decision("allow"),
       async () => evidence,
     );
-    expect(registered.events).toEqual(["tool_call"]);
+    expect(registered.events).toEqual([
+      "tool_call",
+      "tool_result",
+      "session_shutdown",
+    ]);
     expect([...registered.tools.keys()]).toEqual([
       "sisyphus_policy",
       "mcp_vet",

@@ -65,7 +65,9 @@
       "sisyphus_policy"
     ],
     "events": [
-      "tool_call"
+      "tool_call",
+      "tool_result",
+      "session_shutdown"
     ]
   },
   "peerDependencies": {

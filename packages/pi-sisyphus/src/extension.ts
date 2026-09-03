@@ -4,6 +4,7 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
   ToolDefinition,
+  ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -183,13 +184,25 @@ const publicEvaluation = (
     ? { ok: true, decision: evaluation.decision }
     : { ok: false, code: evaluation.code };
 
-const createAttestedToolPolicyHandler = () => {
+const createAttestedToolPolicyHandlers = () => {
   const attestor = createCanaryAttestor();
-  return createToolPolicyHandler(async (input) => {
-    const evaluation = await evaluateTrustWithProvenance(input);
-    await attestor.record(input, evaluation);
-    return publicEvaluation(evaluation);
-  });
+  return {
+    toolCall: createToolPolicyHandler(async (input) => {
+      const evaluation = await evaluateTrustWithProvenance(input);
+      await attestor.record(input, evaluation);
+      return publicEvaluation(evaluation);
+    }),
+    async toolResult(event: ToolResultEvent): Promise<void> {
+      await attestor.complete({
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        isError: event.isError,
+      });
+    },
+    sessionShutdown(): void {
+      attestor.shutdown();
+    },
+  };
 };
 
 const resultText = (evaluation: TrustEvaluation): string =>
@@ -261,7 +274,10 @@ export const createPiSisyphusExtension =
   (api: ExtensionAPI): void => {
     const evaluate = services.evaluate ?? evaluateTrust;
     const vet = services.vet ?? vetMcp;
-    api.on("tool_call", createAttestedToolPolicyHandler());
+    const attestedPolicy = createAttestedToolPolicyHandlers();
+    api.on("tool_call", attestedPolicy.toolCall);
+    api.on("tool_result", attestedPolicy.toolResult);
+    api.on("session_shutdown", attestedPolicy.sessionShutdown);
     api.registerTool(createPolicyTool(evaluate));
     api.registerTool(createMcpVetTool(vet));
     api.registerCommand("permit", {
